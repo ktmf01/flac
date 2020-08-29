@@ -54,6 +54,9 @@ typedef enum {
 	FLAC__APODIZATION_GAUSS,
 	FLAC__APODIZATION_HAMMING,
 	FLAC__APODIZATION_HANN,
+#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+	FLAC__APODIZATION_IRLS,
+#endif
 	FLAC__APODIZATION_KAISER_BESSEL,
 	FLAC__APODIZATION_NUTTALL,
 	FLAC__APODIZATION_RECTANGLE,
@@ -78,6 +81,12 @@ typedef struct {
 			FLAC__real start;
 			FLAC__real end;
 		} multiple_tukey;
+#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+		struct {
+			FLAC__real iterations;
+			FLAC__real orders;
+		} irls;
+#endif
 	} parameters;
 } FLAC__ApodizationSpecification;
 
