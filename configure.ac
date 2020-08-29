@@ -275,6 +275,16 @@ else
 fi
 AC_SUBST(ENABLE_64_BIT_WORDS)
 
+AC_ARG_ENABLE(irls,
+	AS_HELP_STRING([--disable-irls],[Disable iteratively reweighted least squares (IRLS) apodization]))
+if test "x$enable_irls" = xno ; then
+	AC_DEFINE_UNQUOTED([ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES],0,[Enable IRLS apodization])
+else
+	AC_DEFINE_UNQUOTED([ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES],1)
+fi
+AC_SUBST(ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES)
+
+
 AC_ARG_ENABLE(valgrind-testing,
 AS_HELP_STRING([--enable-valgrind-testing],[Run all tests inside Valgrind]),
 [case "${enableval}" in

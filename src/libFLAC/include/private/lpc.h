@@ -116,6 +116,12 @@ void FLAC__lpc_compute_autocorrelation_intrin_neon_lag_14(const FLAC__real data[
  *			 in lp_coeff[7][0,7], etc.
  */
 void FLAC__lpc_compute_lp_coefficients(const double autoc[], uint32_t *max_order, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[]);
+#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[], FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], uint32_t order);
+FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 *data, FLAC__int32 * residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order);
+FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], uint32_t data_len, uint32_t max_order, uint32_t iterations, void (*local_lpc_compute_residual_from_qlp_coefficients_64bit)(const FLAC__int32[], uint32_t, const FLAC__int32[], uint32_t order, int lp_quantization, FLAC__int32[]), FLAC__bool reuse_lpcoeff);
+double FLAC__lpc_compute_expected_bits_per_residual_sample_with_abs_error(double lpc_error);
+#endif
 
 /*
  *	FLAC__lpc_quantize_coefficients()
