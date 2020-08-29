@@ -49,6 +49,7 @@
 #include "share/compat.h"
 #include "FLAC/assert.h"
 #include "FLAC/stream_decoder.h"
+#include "FLAC/stream_decoder.h"
 #include "protected/stream_encoder.h"
 #include "private/bitwriter.h"
 #include "private/bitmath.h"
@@ -137,7 +138,8 @@ static const  struct CompressionLevels {
 	{ true , false,  8, 0, false, false, false, 0, 5, 0, "tukey(5e-1)" },
 	{ true , false,  8, 0, false, false, false, 0, 6, 0, "subdivide_tukey(2)" },
 	{ true , false, 12, 0, false, false, false, 0, 6, 0, "subdivide_tukey(2)" },
-	{ true , false, 12, 0, false, false, false, 0, 6, 0, "subdivide_tukey(3)" }
+	{ true , false, 12, 0, false, false, false, 0, 6, 0, "subdivide_tukey(3)" },
+	{ true , false, 12, 0, false, false, true,  0, 6, 0, "subdivide_tukey(3);irlspost-p(3)" }
 	/* here we use locale-independent 5e-1 instead of 0.5 or 0,5 */
 };
 
@@ -248,7 +250,8 @@ static FLAC__bool apply_apodization_(
 	uint32_t *max_lpc_order_this_apodization,
 	uint32_t subframe_bps,
 	const void *integer_signal,
-	uint32_t *guess_lpc_order
+	uint32_t *guess_lpc_order,
+	FLAC__Subframe *best_subframe
 );
 #endif
 
@@ -1975,6 +1978,29 @@ FLAC_API FLAC__bool FLAC__stream_encoder_set_apodization(FLAC__StreamEncoder *en
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_HAMMING;
 		else if(n==4  && 0 == strncmp("hann"         , specification, n))
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_HANN;
+		#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+		else if(n>6   && 0 == strncmp("irls("       , specification, 5)) {
+			FLAC__int32 iterations = (FLAC__int32)strtod(specification+5, 0);
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.iterations = iterations;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.post = 0;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.precisionsearch = 0;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_IRLS;
+		}
+		else if(n>10  && 0 == strncmp("irlspost("    , specification, 9))  {
+			FLAC__int32 iterations = (FLAC__int32)strtod(specification+9, 0);
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.iterations = iterations;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.post = 1;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.precisionsearch = 0;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_IRLS;
+		}
+		else if(n>12  && 0 == strncmp("irlspost-p("    , specification, 11))  {
+			FLAC__int32 iterations = (FLAC__int32)strtod(specification+11, 0);
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.iterations = iterations;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.post = 1;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.precisionsearch = 1;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_IRLS;
+		}
+		#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 		else if(n==13 && 0 == strncmp("kaiser_bessel", specification, n))
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_KAISER_BESSEL;
 		else if(n==7  && 0 == strncmp("nuttall"      , specification, n))
@@ -2928,6 +2954,11 @@ FLAC__bool resize_buffers_(FLAC__StreamEncoder *encoder, uint32_t new_blocksize)
 				case FLAC__APODIZATION_HANN:
 					FLAC__window_hann(encoder->private_->window[i], new_blocksize);
 					break;
+#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+				case FLAC__APODIZATION_IRLS:
+					// As this isn't an actual apodization, we don't need to call a function
+					break;
+#endif
 				case FLAC__APODIZATION_KAISER_BESSEL:
 					FLAC__window_kaiser_bessel(encoder->private_->window[i], new_blocksize);
 					break;
@@ -4188,7 +4219,7 @@ FLAC__bool process_subframe_(
 						                       frame_header->blocksize, lpc_error,
 						                       &max_lpc_order_this_apodization,
 						                       subframe_bps, integer_signal,
-						                       &guess_lpc_order))
+						                       &guess_lpc_order, subframe[_best_subframe]))
 							/* If apply_apodization_ fails, try next apodization */
 							continue;
 
@@ -4298,9 +4329,48 @@ FLAC__bool apply_apodization_(FLAC__StreamEncoder *encoder,
                         uint32_t *max_lpc_order_this_apodization,
                         uint32_t subframe_bps,
                         const void *integer_signal,
-                        uint32_t *guess_lpc_order)
+                        uint32_t *guess_lpc_order,
+			FLAC__Subframe *best_subframe)
 {
 	apply_apodization_state->current_apodization = &encoder->protected_->apodizations[apply_apodization_state->a];
+
+#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+	if(apply_apodization_state->current_apodization->type == FLAC__APODIZATION_IRLS){
+		if(apply_apodization_state->current_apodization->parameters.irls.post){
+			uint32_t i;
+			if(apply_apodization_state->a > 0 && encoder->protected_->apodizations[(apply_apodization_state->a)-1].type == FLAC__APODIZATION_IRLS) {
+				// Continue with existing lp_coeff
+			}
+			else if(best_subframe->type == FLAC__SUBFRAME_TYPE_LPC) {
+				// Take qlp_coeffs from best subframe and place them in lp_coeff
+				for(i = 0; i < best_subframe->data.lpc.order; i++)
+					threadtask->lp_coeff[*max_lpc_order_this_apodization-1][i] = (FLAC__real)(best_subframe->data.lpc.qlp_coeff[i]) / (1<<(best_subframe->data.lpc.quantization_level));
+				for(;i<*max_lpc_order_this_apodization; i++)
+					threadtask->lp_coeff[*max_lpc_order_this_apodization-1][i] = 0.0f;
+			}
+			else {
+				// Nothing to do irlspost on, set to 0 for next step
+				apply_apodization_state->current_apodization->parameters.irls.post = 0;
+			}
+		}
+		apply_apodization_state->a++;
+		if(!FLAC__lpc_iterate_weighted_least_squares(integer_signal,
+							     threadtask->lp_coeff,
+							     blocksize,
+							     *max_lpc_order_this_apodization,
+							     apply_apodization_state->current_apodization->parameters.irls.iterations,
+							     encoder->private_->local_lpc_compute_residual_from_qlp_coefficients_64bit,
+							     apply_apodization_state->current_apodization->parameters.irls.post)) {
+			return false;
+		}
+		*guess_lpc_order = *max_lpc_order_this_apodization;
+		/* Now fake the lpc_error values, because we don't have them */
+		memset(lpc_error,0,sizeof(lpc_error[0])*(*max_lpc_order_this_apodization));
+		return true;
+	}
+#else
+	(void)best_subframe;
+#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 
 	if(apply_apodization_state->b == 1) {
 		/* window full subblock */
