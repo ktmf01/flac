@@ -48,6 +48,9 @@
 #include <stdio.h>
 #endif
 
+#define IRLS_MOVING_AVERAGE_WINDOW 128
+
+
 /* OPT: #undef'ing this may improve the speed on some architectures */
 #define FLAC__LPC_UNROLLED_FILTER_LOOPS
 
@@ -216,6 +219,236 @@ void FLAC__lpc_compute_lp_coefficients(const double autoc[], uint32_t *max_order
 		}
 	}
 }
+#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[], FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], uint32_t order)
+{
+	int32_t i, j, k, l, order_signed;
+	double x[FLAC__MAX_LPC_ORDER] = {0};
+
+	FLAC__ASSERT(order <= FLAC__MAX_LPC_ORDER);
+
+	order_signed = order;
+
+    // Cholesky decomposition with the Cholesky–Crout algorithm
+    // Overwrites symmetric o-by-o matrix A with lower triangular
+    // o-by-o matrix L.
+    for(j = 0; j < order_signed; j++){
+        for(k = 0; k < j; k++){
+            A[j][j] = A[j][j] - A[j][k]*A[j][k];
+        }
+        A[j][j] = sqrt(A[j][j]);
+        for(k = j + 1; k < order_signed; k++){
+            for(l = 0; l < j; l++){
+                A[k][j] = A[k][j] - A[k][l] * A[j][l];
+            }
+            A[k][j] = A[k][j] / A[j][j];
+        }
+    }
+
+    // Forward substitution of Lx = b, with x overwriting b
+    for(j = 0; j < order_signed; j++){
+        for(k = 0; k < j; k++){
+            b[j] = b[j] - A[j][k] * b[k];
+        }
+        b[j] = b[j] / A[j][j];
+    }
+
+    // Up to here, steps are the same for all orders. The next
+    // step has to be done for each order
+
+    for(i = 0; i < order_signed; i++){
+		for(j = 0; j <= i; j++)
+			x[j] = b[j];
+		// Backward substitution of L'x = b
+		for(j = i; j >= 0; j--){
+			for(k = i; k > j; k--){
+				x[j] = x[j] - A[k][j] * x[k];
+			}
+			x[j] = x[j] / A[j][j];
+			lp_coeff[i][j] = x[j];
+		}
+	}
+}
+
+FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__int32 * flac_restrict residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order)
+{
+	double irls_moving_average_sum, irls_moving_average;
+	double weight[FLAC__MAX_BLOCK_SIZE];
+	double data_precast_full[FLAC__MAX_BLOCK_SIZE];
+	double* data_precast = &data_precast_full[0]+order;
+
+	// First, set AWA and AWb to 0
+	for(uint32_t j = 0; j < order; j++){
+		for(uint32_t k = 0; k <= j; k++){
+			AWA[j][k] = 0.0;
+		}
+		AWb[j] = 0.0;
+	}
+
+	// Now, cast all data to double
+	for(int i = -order; i < (int)data_len; i++)
+		data_precast[i] = data[i];
+
+	// We need a moving average to set the weighting cut-offs.
+	// With this moving average, the rice parameter can be guessed
+	// This needs a headstart. We need to skip the first "order" number
+	// of samples as these contain invalid data
+
+	irls_moving_average_sum = 0.0;
+	for(uint32_t i = 0; i < data_len && i < (IRLS_MOVING_AVERAGE_WINDOW); i++){
+		irls_moving_average_sum += abs(residual[i]);
+	}
+
+
+	// As the weight is the inverse of the residual
+	// we're reusing the residual as the weighing variable
+	// to speed things up
+
+	for(uint32_t i = 0; i < data_len; i++){
+		residual[i] = abs(residual[i]);
+		irls_moving_average = irls_moving_average_sum/IRLS_MOVING_AVERAGE_WINDOW;
+		if(residual[i] < 2)
+			// This is a cap for very small residuals, so they don't get
+			// too much attention
+			weight[i] = 0.5/(irls_moving_average);
+//		else if(residual[i] > (6*irls_moving_average))
+			// Reducing large errors (compared to the moving average)
+			// is usually not possible (in case of outliers) or sacrifices
+			// the fit on other samples. To this end, residuals larger than
+			// 2x the moving average get smaller weights. The multiplication
+			// by the moving average*2 is to make the weighting continuous
+//			weight[i] = 1.0/(irls_moving_average/6)/(residual[i]*residual[i]);
+		else
+			// The weight of a sample is the inverse of the moving average
+			// times the inverse of the residual. By taking the inverse
+			// of the residual
+			weight[i] = 1.0/(irls_moving_average)/residual[i];
+
+		// Update moving average when current sample is at least half a
+		// window length away from beginning or end
+		if(i >= IRLS_MOVING_AVERAGE_WINDOW/2 && (i+IRLS_MOVING_AVERAGE_WINDOW/2) < data_len){
+			irls_moving_average_sum += abs(residual[i+IRLS_MOVING_AVERAGE_WINDOW/2]);
+			irls_moving_average_sum -= residual[i-IRLS_MOVING_AVERAGE_WINDOW/2];
+		}
+	}
+
+#if 0
+	// This loop runs over samples instead of over orders
+	// because of data locality
+	for(int i = 0; i < (int)data_len; i++){
+		for(int j = 0; j < (int)order; j++){
+			for(int k = 0; k <= j; k++){
+				AWA[j][k] += weight[i]*data_precast[i-j-1]*data_precast[i-k-1];
+			}
+			AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
+		}
+	}
+#else
+	// Add some hints for autovectorization
+	if(order == 12 && data_len > 1000){
+#if 0
+		for(int i = 0; i < (int)data_len; i++){
+#if 1
+			AWA[0][0] += weight[i]*data_precast[i-1]*data_precast[i-1];
+			for(int k = 0; k <= 1; k++)
+				AWA[1][k] += weight[i]*data_precast[i-2]*data_precast[i-k-1];
+			for(int k = 0; k <= 2; k++)
+				AWA[2][k] += weight[i]*data_precast[i-3]*data_precast[i-k-1];
+			for(int k = 0; k <= 3; k++)
+				AWA[3][k] += weight[i]*data_precast[i-4]*data_precast[i-k-1];
+			for(int k = 0; k <= 4; k++)
+				AWA[4][k] += weight[i]*data_precast[i-5]*data_precast[i-k-1];
+			for(int k = 0; k <= 5; k++)
+				AWA[5][k] += weight[i]*data_precast[i-6]*data_precast[i-k-1];
+			for(int k = 0; k <= 6; k++)
+				AWA[6][k] += weight[i]*data_precast[i-7]*data_precast[i-k-1];
+			for(int k = 0; k <= 7; k++)
+				AWA[7][k] += weight[i]*data_precast[i-8]*data_precast[i-k-1];
+			for(int k = 0; k <= 8; k++)
+				AWA[8][k] += weight[i]*data_precast[i-9]*data_precast[i-k-1];
+			for(int k = 0; k <= 9; k++)
+				AWA[9][k] += weight[i]*data_precast[i-10]*data_precast[i-k-1];
+			for(int k = 0; k <= 10; k++)
+				AWA[10][k] += weight[i]*data_precast[i-11]*data_precast[i-k-1];
+			for(int k = 0; k <= 11; k++)
+				AWA[11][k] += weight[i]*data_precast[i-12]*data_precast[i-k-1];
+			for(int j = 0; j < (int)order; j++)
+				AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
+#else
+			for(int j = 0; j < (int)order; j++){
+				for(int k = 0; k <= j; k++){
+					AWA[j][k] += weight[i]*data_precast[i-j-1]*data_precast[i-k-1];
+				}
+				AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
+			}
+#endif
+		}
+#else
+		// Swap loops for beter autovectorization
+		for(int j = 0; j < (int)order; j++){
+			for(int i = 0; i < (int)data_len; i++){
+				for(int k = 0; k <= j; k++){
+					AWA[j][k] += weight[i]*data_precast[i-j-1]*data_precast[i-k-1];
+				}
+				AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
+			}
+		}
+#endif
+	}else{
+		for(int i = 0; i < (int)data_len; i++){
+			for(int j = 0; j < (int)order; j++){
+				for(int k = 0; k <= j; k++){
+					AWA[j][k] += weight[i]*data_precast[i-j-1]*data_precast[i-k-1];
+				}
+				AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
+			}
+		}
+	}
+#endif
+
+
+	for(uint32_t i = 0; i < order; i++){
+        if(AWA[i][i] < 1){
+			return false;
+ 		}
+        if(AWb[i] != AWb[i]){
+			return false;
+		}
+	}
+	return true;
+}
+
+FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_restrict data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], uint32_t data_len, uint32_t max_order, uint32_t iterations, void (*local_lpc_compute_residual_from_qlp_coefficients_64bit)(const FLAC__int32[], uint32_t, const FLAC__int32[], uint32_t order, int lp_quantization, FLAC__int32[]), FLAC__bool reuse_lpcoeff)
+{
+	double AWA[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER] = {0};
+	double AWb[FLAC__MAX_LPC_ORDER] = {0};
+	FLAC__int32 residual[FLAC__MAX_BLOCK_SIZE];
+	uint32_t i,j;
+	int quantization;
+	FLAC__int32 qlp_coeff[FLAC__MAX_LPC_ORDER];
+
+	if(data_len <= max_order)
+		return false;
+	for(i = 0; i < flac_max(iterations,(uint32_t)1); i++){
+		if(i == 0 && !reuse_lpcoeff){
+			// For i == 0, we start with no weighting, except when reuse_lpcoeff is set
+			for(j = 0; j < data_len; j++){
+				residual[j] = 1;
+			}
+		}else{
+			// Copy predictor from lp_coeff
+			FLAC__lpc_quantize_coefficients(lp_coeff[max_order-1], max_order, 16, qlp_coeff, &quantization);
+			local_lpc_compute_residual_from_qlp_coefficients_64bit(data+max_order, (data_len-max_order), qlp_coeff, max_order, quantization, residual);
+		}
+		if(!FLAC__lpc_weigh_data(data+max_order,residual,AWA,AWb,(data_len-max_order),max_order))
+			return false;
+		FLAC__lpc_solve_symmetric_matrix(AWA,AWb,lp_coeff,max_order);
+
+	}
+
+    return true;
+}
+#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 
 int FLAC__lpc_quantize_coefficients(const FLAC__real lp_coeff[], uint32_t order, uint32_t precision, FLAC__int32 qlp_coeff[], int *shift)
 {
@@ -1601,6 +1834,24 @@ double FLAC__lpc_compute_expected_bits_per_residual_sample_with_error_scale(doub
 		return 0.0;
 	}
 }
+#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+double FLAC__lpc_compute_expected_bits_per_residual_sample_with_abs_error(double lpc_error)
+{
+	if(lpc_error > 0.0) {
+		double bps = log(M_LN2 * lpc_error) / M_LN2;
+		if(bps >= 0.0)
+			return bps;
+		else
+			return 0.0;
+	}
+	else if(lpc_error < 0.0) { /* error should not be negative but can happen due to inadequate floating-point resolution */
+		return 1e32;
+	}
+	else {
+		return 0.0;
+	}
+}
+#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 
 uint32_t FLAC__lpc_compute_best_order(const double lpc_error[], uint32_t max_order, uint32_t total_samples, uint32_t overhead_bits_per_order)
 {
