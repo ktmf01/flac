@@ -46,6 +46,7 @@
 #include <stdio.h>
 #endif
 
+
 /* OPT: #undef'ing this may improve the speed on some architectures */
 #define FLAC__LPC_UNROLLED_FILTER_LOOPS
 
@@ -163,11 +164,9 @@ void FLAC__lpc_compute_lp_coefficients(const double autoc[], uint32_t *max_order
 	}
 }
 #ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
-void FLAC__lpc_solve_symmetric_matrix(FLAC__real A[][FLAC__MAX_LPC_ORDER], FLAC__real b[], uint32_t order)
+void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[], uint32_t order)
 {
 	int32_t j, k, l, order_signed;
-	FLAC__real Abackup[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER] = {0};
-	FLAC__real bbackup[FLAC__MAX_LPC_ORDER] = {0};
 
 	FLAC__ASSERT(order <= FLAC__MAX_LPC_ORDER);
 
@@ -206,7 +205,7 @@ void FLAC__lpc_solve_symmetric_matrix(FLAC__real A[][FLAC__MAX_LPC_ORDER], FLAC_
     }
 }
 
-FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__real * flac_restrict residual, FLAC__real AWA[][FLAC__MAX_LPC_ORDER], FLAC__real AWb[], uint32_t data_len, uint32_t order)
+FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__real * flac_restrict residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order)
 {
 	uint32_t i, j, k;
     // First, get inverse of residual
@@ -242,11 +241,9 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 
     for(i = 0; i < order; i++){
         if(AWA[i][i] < 1){
-			fprintf(stderr, "AWA[i][i] is kleiner dan 1 voor order: %d\n", order);
             return false;
         }
         if(AWb[i] != AWb[i]){
-			fprintf(stderr, "AWb[j] is nan voor order: %d\n", order);
 			return false;
 		}
     }
@@ -255,8 +252,8 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 
 FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_restrict data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[], uint32_t data_len, uint32_t max_order, uint32_t num_order, uint32_t iterations)
 {
-	FLAC__real AWA[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER] = {0};
-	FLAC__real AWb[FLAC__MAX_LPC_ORDER]  = {0};
+	double AWA[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER] = {0};
+	double AWb[FLAC__MAX_LPC_ORDER]  = {0};
 	FLAC__real predictor[FLAC__MAX_LPC_ORDER];
 	FLAC__real residual[FLAC__MAX_BLOCK_SIZE];
 	uint32_t order_list[FLAC__MAX_LPC_ORDER];
@@ -294,9 +291,10 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 
     for(i = 0; i < num_order; i++){
 		o = order_list[i];
-        for(j = 0; j < iterations; j++){
-			if(o < 3 && j == 0){
-				// For orders 1 and 2, we start with no weighting
+		// In case iterations ==  0, we do one iteration without building on the last one
+        for(j = 0; j < flac_max(iterations,(uint32_t)1); j++){
+			if((o < 3 && j == 0) || iterations == 0){
+				// For orders 1 and 2 or iterations == 0, we start with no weighting
 				for(k = 0; k < data_len; k++){
 					residual[k] = 1;
 				}
@@ -315,17 +313,28 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 			if(!FLAC__lpc_weigh_data(data,residual,AWA,AWb,data_len,o))
 				return false;
             FLAC__lpc_solve_symmetric_matrix(AWA,AWb,o);
+
 		}
 		for(j = 0; j < o; j++)
-			lp_coeff[o-1][j] = AWb[j];
+			lp_coeff[o-1][j] = (FLAC__real)AWb[j];
+		if(iterations == 0){
+			// For iterations == 0, we cannot reuse residual data
+			FLAC__lpc_compute_residual_from_qlp_coefficients_float(data, data_len, lp_coeff[o-1], o, residual);
+			error[o-1] = 0.0;
+			for(k = o; k < data_len; k++)
+				error[o-1] += fabs(residual[i]);
+			error[o-1] /= data_len-o;
+		}
     }
 
-    // Calculate err for highest order
-    FLAC__lpc_compute_residual_from_qlp_coefficients_float(data, data_len, lp_coeff[o-1], o, residual);
-    error[o-1] = 0.0;
-    for(i = o; i < data_len; i++)
-		error[o-1] += fabs(residual[i]);
-	error[o-1] /= data_len-o;
+		// Calculate err for highest order
+	if(iterations != 0){
+		FLAC__lpc_compute_residual_from_qlp_coefficients_float(data, data_len, lp_coeff[o-1], o, residual);
+		error[o-1] = 0.0;
+		for(i = o; i < data_len; i++)
+			error[o-1] += fabs(residual[i]);
+		error[o-1] /= data_len-o;
+	}
     return true;
 }
 #endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
