@@ -209,13 +209,16 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 {
 	uint32_t i, j, k;
     // First, get inverse of residual
-    // As the weighting is the inverse of the residual
-    // were using the residual as the weighting variable
+    // As the weight is the inverse of the residual
+    // we're reusing the residual as the weighing variable
     // to speed things up
     for(i = 0; i < data_len; i++){
 		residual[i] = fabs(residual[i]);
-		if(residual[i] < 0.1)
-			residual[i] = 10;
+		if(residual[i] < 1)
+			// Reducing small errors usually doesn't result in a
+			// lower rice number hence no improved compression. 
+			// What is considered small depends on context
+			residual[i] = 1;
 		else
 			residual[i] = 1.0/residual[i];
     }
@@ -303,7 +306,7 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 					predictor[k] = AWb[k];
 				FLAC__lpc_compute_residual_from_qlp_coefficients_float(data, data_len, predictor, o, residual);
 				if(j == 0 && o > 2){
-					// Residual is the error of the last order
+					// Residual is used as error of the previous order
 					error[o-2] = 0.0;
 					for(k = o; k < data_len; k++)
 						error[o-2] += fabs(residual[k]);
