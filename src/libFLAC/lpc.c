@@ -220,16 +220,16 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 		}
 		AWb[j] = 0;
 	}
-	
+
 	// We need a moving average to set the weighting cut-offs.
 	// With this moving average, the rice parameter can be guessed
-	// This obviously needs a headstart
+	// This needs a headstart
 
 	irls_moving_average = 0.0f;
 	for(i = 0; i < data_len && i < IRLS_MOVING_AVERAGE_WINDOW; i++){
 		irls_moving_average += fabs(residual[i]);
-	} 
-	
+	}
+
     // As the weight is the inverse of the residual
     // we're reusing the residual as the weighing variable
     // to speed things up
@@ -238,25 +238,31 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 		if(residual[i] < (irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW/4))
 			// Reducing small errors (compared to the moving average)
 			// usually doesn't result in a lower rice number hence no
-			// improved compression. 
+			// improved compression. To this end, residual smaller than
+			// 1/4th of the moving average get weights as if they were
+			// 1/4th of the moving average
 			weight[i] = 1.0/(irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW/4);
 		//else if(residual[i] > (irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW*2))
 			// Reducing large errors (compared to the moving average)
 			// is usually not possible (in case of outliers) or sacrifices
-			// the fit on other samples. So, we assign these a small 
-			// weight
-			//weight[i] = 1.0/(residual[i]*residual[i]);
+			// the fit on other samples. To this end, residuals larger than
+			// 2x the moving average get smaller weights. The multiplication
+			// by the moving average*2 is to make the weighting continuous
+			//weight[i] = irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW*2/(residual[i]*residual[i]);
 		else
 			// Reducing errors in the right band (comparable to the
-			// moving average) usually works best
+			// moving average) usually works best. The weight is the inverse
+			// of the residual, so we get a 'least absolute deviation'
+			// weighting, or a so-called L1-norm
 			weight[i] = 1.0/residual[i];
-			
-		// Update moving average	
+
+		// Update moving average when current sample is at least half a
+		// window length away from beginning or end
 		if(i > IRLS_MOVING_AVERAGE_WINDOW/2 && (i+IRLS_MOVING_AVERAGE_WINDOW/2) < data_len){
 			irls_moving_average += fabs(residual[i+IRLS_MOVING_AVERAGE_WINDOW/2]);
 			irls_moving_average -= residual[i-IRLS_MOVING_AVERAGE_WINDOW/2];
 		}
-			
+
     }
 
     // This loop runs over samples instead of over orders
