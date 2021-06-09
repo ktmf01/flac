@@ -46,6 +46,8 @@
 #include <stdio.h>
 #endif
 
+#define IRLS_MOVING_AVERAGE_WINDOW 128
+
 
 /* OPT: #undef'ing this may improve the speed on some architectures */
 #define FLAC__LPC_UNROLLED_FILTER_LOOPS
@@ -208,21 +210,9 @@ void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[
 FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__real * flac_restrict residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order)
 {
 	uint32_t i, j, k;
-    // First, get inverse of residual
-    // As the weight is the inverse of the residual
-    // we're reusing the residual as the weighing variable
-    // to speed things up
-    for(i = 0; i < data_len; i++){
-		residual[i] = fabs(residual[i]);
-		if(residual[i] < 1)
-			// Reducing small errors usually doesn't result in a
-			// lower rice number hence no improved compression. 
-			// What is considered small depends on context
-			residual[i] = 1;
-		else
-			residual[i] = 1.0/residual[i];
-    }
-
+	FLAC__real irls_moving_average;
+	FLAC__real weight[FLAC__MAX_BLOCK_SIZE];
+	
     // First, set AWA and AWb to 0
 	for(j = 0; j < order; j++){
 		for(k = 0; k <= j; k++){
@@ -230,15 +220,53 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 		}
 		AWb[j] = 0;
 	}
+	
+	// We need a moving average to set the weighting cut-offs.
+	// With this moving average, the rice parameter can be guessed
+	// This obviously needs a headstart
+
+	irls_moving_average = 0.0f;
+	for(i = 0; i < data_len && i < IRLS_MOVING_AVERAGE_WINDOW; i++){
+		irls_moving_average += fabs(residual[i]);
+	} 
+	
+    // As the weight is the inverse of the residual
+    // we're reusing the residual as the weighing variable
+    // to speed things up
+    for(i = 0; i < data_len; i++){
+		residual[i] = fabs(residual[i]);
+		if(residual[i] < (irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW/4))
+			// Reducing small errors (compared to the moving average)
+			// usually doesn't result in a lower rice number hence no
+			// improved compression. 
+			weight[i] = 1.0/(irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW/4);
+		//else if(residual[i] > (irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW*2))
+			// Reducing large errors (compared to the moving average)
+			// is usually not possible (in case of outliers) or sacrifices
+			// the fit on other samples. So, we assign these a small 
+			// weight
+			//weight[i] = 1.0/(residual[i]*residual[i]);
+		else
+			// Reducing errors in the right band (comparable to the
+			// moving average) usually works best
+			weight[i] = 1.0/residual[i];
+			
+		// Update moving average	
+		if(i > IRLS_MOVING_AVERAGE_WINDOW/2 && (i+IRLS_MOVING_AVERAGE_WINDOW/2) < data_len){
+			irls_moving_average += fabs(residual[i+IRLS_MOVING_AVERAGE_WINDOW/2]);
+			irls_moving_average -= residual[i-IRLS_MOVING_AVERAGE_WINDOW/2];
+		}
+			
+    }
 
     // This loop runs over samples instead of over orders
     // because of data locality
 	for(i = order; i < data_len; i++){
 		for(j = 0; j < order; j++){
 			for(k = 0; k <= j; k++){
-				AWA[j][k] += residual[i]*data[i-j-1]*data[i-k-1];
+				AWA[j][k] += weight[i]*data[i-j-1]*data[i-k-1];
 			}
-			AWb[j] += residual[i]*data[i-j-1]*data[i];
+			AWb[j] += weight[i]*data[i-j-1]*data[i];
         }
     }
 
