@@ -210,9 +210,9 @@ void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[
 FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__real * flac_restrict residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order)
 {
 	uint32_t i, j, k;
-	FLAC__real irls_moving_average;
+	FLAC__real irls_moving_average_sum, irls_moving_average;
 	FLAC__real weight[FLAC__MAX_BLOCK_SIZE];
-	
+
     // First, set AWA and AWb to 0
 	for(j = 0; j < order; j++){
 		for(k = 0; k <= j; k++){
@@ -223,46 +223,47 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 
 	// We need a moving average to set the weighting cut-offs.
 	// With this moving average, the rice parameter can be guessed
-	// This needs a headstart
+	// This needs a headstart. We need to skip the first "order" number
+	// of samples as these contain invalid data
 
-	irls_moving_average = 0.0f;
-	for(i = 0; i < data_len && i < IRLS_MOVING_AVERAGE_WINDOW; i++){
-		irls_moving_average += fabs(residual[i]);
+	irls_moving_average_sum = 0.0f;
+	for(i = order; i < data_len && i < (IRLS_MOVING_AVERAGE_WINDOW+order); i++){
+		irls_moving_average_sum += fabs(residual[i]);
 	}
+	
+	// TODO: don't forget data[] and residual[] are shifted by order!
+	// The last o elements of residual[] before data_len should be empty
 
     // As the weight is the inverse of the residual
     // we're reusing the residual as the weighing variable
     // to speed things up
-    for(i = 0; i < data_len; i++){
+
+    for(i = order; i < data_len; i++){
 		residual[i] = fabs(residual[i]);
-		if(residual[i] < (irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW/4))
-			// Reducing small errors (compared to the moving average)
-			// usually doesn't result in a lower rice number hence no
-			// improved compression. To this end, residual smaller than
-			// 1/4th of the moving average get weights as if they were
-			// 1/4th of the moving average
-			weight[i] = 1.0/(irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW/4);
-		//else if(residual[i] > (irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW*2))
+		irls_moving_average = irls_moving_average_sum/IRLS_MOVING_AVERAGE_WINDOW;
+		if(residual[i] < 2)
+			// This is a cap for very small residuals, so they don't get
+			// too much attention
+			weight[i] = 0.5/(irls_moving_average);
+//		else if(residual[i] > (6*irls_moving_average))
 			// Reducing large errors (compared to the moving average)
 			// is usually not possible (in case of outliers) or sacrifices
 			// the fit on other samples. To this end, residuals larger than
 			// 2x the moving average get smaller weights. The multiplication
 			// by the moving average*2 is to make the weighting continuous
-			//weight[i] = irls_moving_average/IRLS_MOVING_AVERAGE_WINDOW*2/(residual[i]*residual[i]);
+//			weight[i] = 1.0/(irls_moving_average/6)/(residual[i]*residual[i]);
 		else
-			// Reducing errors in the right band (comparable to the
-			// moving average) usually works best. The weight is the inverse
-			// of the residual, so we get a 'least absolute deviation'
-			// weighting, or a so-called L1-norm
-			weight[i] = 1.0/residual[i];
+			// The weight of a sample is the inverse of the moving average
+			// times the inverse of the residual. By taking the inverse
+			// of the residual
+			weight[i] = 1.0/(irls_moving_average)/residual[i];
 
 		// Update moving average when current sample is at least half a
 		// window length away from beginning or end
-		if(i > IRLS_MOVING_AVERAGE_WINDOW/2 && (i+IRLS_MOVING_AVERAGE_WINDOW/2) < data_len){
-			irls_moving_average += fabs(residual[i+IRLS_MOVING_AVERAGE_WINDOW/2]);
-			irls_moving_average -= residual[i-IRLS_MOVING_AVERAGE_WINDOW/2];
+		if(i >= order+IRLS_MOVING_AVERAGE_WINDOW/2 && (i+IRLS_MOVING_AVERAGE_WINDOW/2) < data_len){
+			irls_moving_average_sum += fabs(residual[i+IRLS_MOVING_AVERAGE_WINDOW/2]);
+			irls_moving_average_sum -= residual[i-IRLS_MOVING_AVERAGE_WINDOW/2];
 		}
-
     }
 
     // This loop runs over samples instead of over orders
@@ -996,7 +997,7 @@ void FLAC__lpc_compute_residual_from_qlp_coefficients_wide(const FLAC__int32 * f
 void FLAC__lpc_compute_residual_from_qlp_coefficients_float(const FLAC__int32 * flac_restrict data, uint32_t data_len, const FLAC__real * flac_restrict lp_coeff, uint32_t order, FLAC__real * flac_restrict residual)
 {
 	int i;
-	FLAC__int32 sum;
+	FLAC__real sum;
 
 	FLAC__ASSERT(order > 0);
 	FLAC__ASSERT(order <= 32);
