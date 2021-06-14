@@ -970,10 +970,15 @@ int parse_option(int short_option, const char *long_option, const char *option_a
 			case '6':
 			case '7':
 			case '8':
+#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+			case '9':
+#endif
 				add_compression_setting_uint32_t(CST_COMPRESSION_LEVEL, short_option-'0');
 				break;
+#ifndef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 			case '9':
 				return usage_error("ERROR: compression level '9' is reserved\n");
+#endif
 			case 'V':
 				option_values.verify = true;
 				break;
