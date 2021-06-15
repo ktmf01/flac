@@ -213,7 +213,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 	FLAC__real irls_moving_average_sum, irls_moving_average;
 	FLAC__real weight[FLAC__MAX_BLOCK_SIZE];
 
-    // First, set AWA and AWb to 0
+	// First, set AWA and AWb to 0
 	for(j = 0; j < order; j++){
 		for(k = 0; k <= j; k++){
 			AWA[j][k] = 0;
@@ -230,15 +230,13 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 	for(i = order; i < data_len && i < (IRLS_MOVING_AVERAGE_WINDOW+order); i++){
 		irls_moving_average_sum += fabs(residual[i]);
 	}
-	
-	// TODO: don't forget data[] and residual[] are shifted by order!
-	// The last o elements of residual[] before data_len should be empty
 
-    // As the weight is the inverse of the residual
-    // we're reusing the residual as the weighing variable
-    // to speed things up
 
-    for(i = order; i < data_len; i++){
+	// As the weight is the inverse of the residual
+	// we're reusing the residual as the weighing variable
+	// to speed things up
+
+ 	for(i = order; i < data_len; i++){
 		residual[i] = fabs(residual[i]);
 		irls_moving_average = irls_moving_average_sum/IRLS_MOVING_AVERAGE_WINDOW;
 		if(residual[i] < 2)
@@ -264,28 +262,28 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 			irls_moving_average_sum += fabs(residual[i+IRLS_MOVING_AVERAGE_WINDOW/2]);
 			irls_moving_average_sum -= residual[i-IRLS_MOVING_AVERAGE_WINDOW/2];
 		}
-    }
+	}
 
-    // This loop runs over samples instead of over orders
-    // because of data locality
+	// This loop runs over samples instead of over orders
+	// because of data locality
 	for(i = order; i < data_len; i++){
 		for(j = 0; j < order; j++){
 			for(k = 0; k <= j; k++){
 				AWA[j][k] += weight[i]*data[i-j-1]*data[i-k-1];
 			}
 			AWb[j] += weight[i]*data[i-j-1]*data[i];
-        }
-    }
+       		}
+	}
 
-    for(i = 0; i < order; i++){
-        if(AWA[i][i] < 1){
-            return false;
-        }
-        if(AWb[i] != AWb[i]){
+	for(i = 0; i < order; i++){
+        	if(AWA[i][i] < 1){
+			return false;
+ 		}
+        	if(AWb[i] != AWb[i]){
 			return false;
 		}
-    }
-    return true;
+	}
+	return true;
 }
 
 FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_restrict data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[], uint32_t data_len, uint32_t max_order, uint32_t num_order, uint32_t iterations)
@@ -312,7 +310,7 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 	}else{
 		order_list[0] = 2;
 		for(i = 1; i < (num_order - 1); i++)
-			order_list[i] = (max_order-2)/(num_order-1)*i+2;
+			order_list[i] = 2+(i*(max_order-2))/(num_order-1);
 		order_list[num_order-1] = max_order;
 	}
 
