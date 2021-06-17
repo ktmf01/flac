@@ -130,7 +130,7 @@ void FLAC__lpc_compute_autocorrelation_intrin_neon_lag_14(const FLAC__real data[
 void FLAC__lpc_compute_lp_coefficients(const double autoc[], uint32_t *max_order, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[]);
 #ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[], uint32_t order);
-FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 *data, FLAC__real * residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order);
+FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 *data, FLAC__int32 * residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order);
 FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 *data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[], uint32_t data_len, uint32_t max_order, uint32_t num_order, uint32_t iterations);
 double FLAC__lpc_compute_expected_bits_per_residual_sample_with_abs_error(double lpc_error);
 #endif
@@ -172,7 +172,6 @@ int FLAC__lpc_quantize_coefficients(const FLAC__real lp_coeff[], uint32_t order,
  */
 void FLAC__lpc_compute_residual_from_qlp_coefficients(const FLAC__int32 *data, uint32_t data_len, const FLAC__int32 qlp_coeff[], uint32_t order, int lp_quantization, FLAC__int32 residual[]);
 void FLAC__lpc_compute_residual_from_qlp_coefficients_wide(const FLAC__int32 *data, uint32_t data_len, const FLAC__int32 qlp_coeff[], uint32_t order, int lp_quantization, FLAC__int32 residual[]);
-void FLAC__lpc_compute_residual_from_qlp_coefficients_float(const FLAC__int32 *data, uint32_t data_len, const FLAC__real lp_coeff[], uint32_t order, FLAC__real residual[]);
 #ifndef FLAC__NO_ASM
 #  ifdef FLAC__CPU_IA32
 #    ifdef FLAC__HAS_NASM
