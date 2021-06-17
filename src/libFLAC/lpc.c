@@ -207,7 +207,7 @@ void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[
     }
 }
 
-FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__real * flac_restrict residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order)
+FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__int32 * flac_restrict residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order)
 {
 	uint32_t i, j, k;
 	FLAC__real irls_moving_average_sum, irls_moving_average;
@@ -228,7 +228,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 
 	irls_moving_average_sum = 0.0f;
 	for(i = order; i < data_len && i < (IRLS_MOVING_AVERAGE_WINDOW+order); i++){
-		irls_moving_average_sum += fabs(residual[i]);
+		irls_moving_average_sum += abs(residual[i]);
 	}
 
 
@@ -237,7 +237,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 	// to speed things up
 
  	for(i = order; i < data_len; i++){
-		residual[i] = fabs(residual[i]);
+		residual[i] = abs(residual[i]);
 		irls_moving_average = irls_moving_average_sum/IRLS_MOVING_AVERAGE_WINDOW;
 		if(residual[i] < 2)
 			// This is a cap for very small residuals, so they don't get
@@ -259,7 +259,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__re
 		// Update moving average when current sample is at least half a
 		// window length away from beginning or end
 		if(i >= order+IRLS_MOVING_AVERAGE_WINDOW/2 && (i+IRLS_MOVING_AVERAGE_WINDOW/2) < data_len){
-			irls_moving_average_sum += fabs(residual[i+IRLS_MOVING_AVERAGE_WINDOW/2]);
+			irls_moving_average_sum += abs(residual[i+IRLS_MOVING_AVERAGE_WINDOW/2]);
 			irls_moving_average_sum -= residual[i-IRLS_MOVING_AVERAGE_WINDOW/2];
 		}
 	}
@@ -291,9 +291,11 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 	double AWA[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER] = {0};
 	double AWb[FLAC__MAX_LPC_ORDER]  = {0};
 	FLAC__real predictor[FLAC__MAX_LPC_ORDER];
-	FLAC__real residual[FLAC__MAX_BLOCK_SIZE];
+	FLAC__int32 residual[FLAC__MAX_BLOCK_SIZE];
 	uint32_t order_list[FLAC__MAX_LPC_ORDER];
 	uint32_t o,i,j,k;
+	int quantization;
+	FLAC__int32 qlp_coeff[FLAC__MAX_LPC_ORDER];
 
 	// First, list the orders to iterate
 	if(max_order < 1 || num_order < 1){
@@ -337,12 +339,13 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 			}else{
 				for(k = 0; k < max_order; k++)
 					predictor[k] = AWb[k];
-				FLAC__lpc_compute_residual_from_qlp_coefficients_float(data, data_len, predictor, o, residual);
+				FLAC__lpc_quantize_coefficients(predictor, o, 16, qlp_coeff, &quantization);
+				FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, o, quantization, residual);
 				if(j == 0 && o > 2){
 					// Residual is used as error of the previous order
 					error[o-2] = 0.0;
 					for(k = o; k < data_len; k++)
-						error[o-2] += fabs(residual[k]);
+						error[o-2] += abs(residual[k]);
 					error[o-2] /= data_len-o;
 				}
 			}
@@ -355,20 +358,22 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 			lp_coeff[o-1][j] = (FLAC__real)AWb[j];
 		if(iterations == 0){
 			// For iterations == 0, we cannot reuse residual data
-			FLAC__lpc_compute_residual_from_qlp_coefficients_float(data, data_len, lp_coeff[o-1], o, residual);
+			FLAC__lpc_quantize_coefficients(lp_coeff[o-1], o, 16, qlp_coeff, &quantization);
+			FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, o, quantization, residual);
 			error[o-1] = 0.0;
 			for(k = o; k < data_len; k++)
-				error[o-1] += fabs(residual[i]);
+				error[o-1] += abs(residual[i]);
 			error[o-1] /= data_len-o;
 		}
     }
 
 		// Calculate err for highest order
 	if(iterations != 0){
-		FLAC__lpc_compute_residual_from_qlp_coefficients_float(data, data_len, lp_coeff[o-1], o, residual);
+		FLAC__lpc_quantize_coefficients(lp_coeff[o-1], o, 16, qlp_coeff, &quantization);
+		FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, o, quantization, residual);
 		error[o-1] = 0.0;
 		for(i = o; i < data_len; i++)
-			error[o-1] += fabs(residual[i]);
+			error[o-1] += abs(residual[i]);
 		error[o-1] /= data_len-o;
 	}
     return true;
@@ -990,230 +995,6 @@ void FLAC__lpc_compute_residual_from_qlp_coefficients_wide(const FLAC__int32 * f
 	}
 }
 #endif
-
-#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
-void FLAC__lpc_compute_residual_from_qlp_coefficients_float(const FLAC__int32 * flac_restrict data, uint32_t data_len, const FLAC__real * flac_restrict lp_coeff, uint32_t order, FLAC__real * flac_restrict residual)
-{
-	int i;
-	FLAC__real sum;
-
-	FLAC__ASSERT(order > 0);
-	FLAC__ASSERT(order <= 32);
-
-	/*
-	 * We do unique versions up to 12th order since that's the subset limit.
-	 * Also they are roughly ordered to match frequency of occurrence to
-	 * minimize branching.
-	 */
-	if(order <= 12) {
-		if(order > 8) {
-			if(order > 10) {
-				if(order == 12) {
-					for(i = 12; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[11] * data[i-12];
-						sum += lp_coeff[10] * data[i-11];
-						sum += lp_coeff[9] * data[i-10];
-						sum += lp_coeff[8] * data[i-9];
-						sum += lp_coeff[7] * data[i-8];
-						sum += lp_coeff[6] * data[i-7];
-						sum += lp_coeff[5] * data[i-6];
-						sum += lp_coeff[4] * data[i-5];
-						sum += lp_coeff[3] * data[i-4];
-						sum += lp_coeff[2] * data[i-3];
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-				else { /* order == 11 */
-					for(i = 11; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[10] * data[i-11];
-						sum += lp_coeff[9] * data[i-10];
-						sum += lp_coeff[8] * data[i-9];
-						sum += lp_coeff[7] * data[i-8];
-						sum += lp_coeff[6] * data[i-7];
-						sum += lp_coeff[5] * data[i-6];
-						sum += lp_coeff[4] * data[i-5];
-						sum += lp_coeff[3] * data[i-4];
-						sum += lp_coeff[2] * data[i-3];
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-			}
-			else {
-				if(order == 10) {
-					for(i = 0; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[9] * data[i-10];
-						sum += lp_coeff[8] * data[i-9];
-						sum += lp_coeff[7] * data[i-8];
-						sum += lp_coeff[6] * data[i-7];
-						sum += lp_coeff[5] * data[i-6];
-						sum += lp_coeff[4] * data[i-5];
-						sum += lp_coeff[3] * data[i-4];
-						sum += lp_coeff[2] * data[i-3];
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-				else { /* order == 9 */
-					for(i = 0; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[8] * data[i-9];
-						sum += lp_coeff[7] * data[i-8];
-						sum += lp_coeff[6] * data[i-7];
-						sum += lp_coeff[5] * data[i-6];
-						sum += lp_coeff[4] * data[i-5];
-						sum += lp_coeff[3] * data[i-4];
-						sum += lp_coeff[2] * data[i-3];
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-			}
-		}
-		else if(order > 4) {
-			if(order > 6) {
-				if(order == 8) {
-					for(i = 0; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[7] * data[i-8];
-						sum += lp_coeff[6] * data[i-7];
-						sum += lp_coeff[5] * data[i-6];
-						sum += lp_coeff[4] * data[i-5];
-						sum += lp_coeff[3] * data[i-4];
-						sum += lp_coeff[2] * data[i-3];
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-				else { /* order == 7 */
-					for(i = 0; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[6] * data[i-7];
-						sum += lp_coeff[5] * data[i-6];
-						sum += lp_coeff[4] * data[i-5];
-						sum += lp_coeff[3] * data[i-4];
-						sum += lp_coeff[2] * data[i-3];
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-			}
-			else {
-				if(order == 6) {
-					for(i = 0; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[5] * data[i-6];
-						sum += lp_coeff[4] * data[i-5];
-						sum += lp_coeff[3] * data[i-4];
-						sum += lp_coeff[2] * data[i-3];
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-				else { /* order == 5 */
-					for(i = 0; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[4] * data[i-5];
-						sum += lp_coeff[3] * data[i-4];
-						sum += lp_coeff[2] * data[i-3];
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-			}
-		}
-		else {
-			if(order > 2) {
-				if(order == 4) {
-					for(i = 0; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[3] * data[i-4];
-						sum += lp_coeff[2] * data[i-3];
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-				else { /* order == 3 */
-					for(i = 0; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[2] * data[i-3];
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-			}
-			else {
-				if(order == 2) {
-					for(i = 0; i < (int)data_len; i++) {
-						sum = 0;
-						sum += lp_coeff[1] * data[i-2];
-						sum += lp_coeff[0] * data[i-1];
-						residual[i] = data[i] - sum;
-					}
-				}
-				else { /* order == 1 */
-					for(i = 0; i < (int)data_len; i++)
-						residual[i] = data[i] - (lp_coeff[0] * data[i-1]);
-				}
-			}
-		}
-	}
-	else { /* order > 12 */
-		for(i = 0; i < (int)data_len; i++) {
-			sum = 0;
-			switch(order) {
-				case 32: sum += lp_coeff[31] * data[i-32]; /* Falls through. */
-				case 31: sum += lp_coeff[30] * data[i-31]; /* Falls through. */
-				case 30: sum += lp_coeff[29] * data[i-30]; /* Falls through. */
-				case 29: sum += lp_coeff[28] * data[i-29]; /* Falls through. */
-				case 28: sum += lp_coeff[27] * data[i-28]; /* Falls through. */
-				case 27: sum += lp_coeff[26] * data[i-27]; /* Falls through. */
-				case 26: sum += lp_coeff[25] * data[i-26]; /* Falls through. */
-				case 25: sum += lp_coeff[24] * data[i-25]; /* Falls through. */
-				case 24: sum += lp_coeff[23] * data[i-24]; /* Falls through. */
-				case 23: sum += lp_coeff[22] * data[i-23]; /* Falls through. */
-				case 22: sum += lp_coeff[21] * data[i-22]; /* Falls through. */
-				case 21: sum += lp_coeff[20] * data[i-21]; /* Falls through. */
-				case 20: sum += lp_coeff[19] * data[i-20]; /* Falls through. */
-				case 19: sum += lp_coeff[18] * data[i-19]; /* Falls through. */
-				case 18: sum += lp_coeff[17] * data[i-18]; /* Falls through. */
-				case 17: sum += lp_coeff[16] * data[i-17]; /* Falls through. */
-				case 16: sum += lp_coeff[15] * data[i-16]; /* Falls through. */
-				case 15: sum += lp_coeff[14] * data[i-15]; /* Falls through. */
-				case 14: sum += lp_coeff[13] * data[i-14]; /* Falls through. */
-				case 13: sum += lp_coeff[12] * data[i-13];
-				         sum += lp_coeff[11] * data[i-12];
-				         sum += lp_coeff[10] * data[i-11];
-				         sum += lp_coeff[ 9] * data[i-10];
-				         sum += lp_coeff[ 8] * data[i- 9];
-				         sum += lp_coeff[ 7] * data[i- 8];
-				         sum += lp_coeff[ 6] * data[i- 7];
-				         sum += lp_coeff[ 5] * data[i- 6];
-				         sum += lp_coeff[ 4] * data[i- 5];
-				         sum += lp_coeff[ 3] * data[i- 4];
-				         sum += lp_coeff[ 2] * data[i- 3];
-				         sum += lp_coeff[ 1] * data[i- 2];
-				         sum += lp_coeff[ 0] * data[i- 1];
-			}
-			residual[i] = data[i] - sum;
-		}
-	}
-}
-#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 
 #endif /* !defined FLAC__INTEGER_ONLY_LIBRARY */
 
