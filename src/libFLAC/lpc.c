@@ -377,8 +377,13 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 		}
     }
 
-		// Calculate err for highest order
-	if(iterations != 0){
+		// Calculate err for highest order, but only when num_order > 1 
+	if(num_order == 1){
+		// If we only did one order, calculating the error would be
+		// a waste of time. We set error to a low enough value that
+		// it won't be rejected outright
+		error[o-1] = 1.0;
+	}else if(iterations != 0){
 		FLAC__lpc_quantize_coefficients(lp_coeff[o-1], o, 16, qlp_coeff, &quantization);
 		FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, o, quantization, residual);
 		error[o-1] = 0.0;
@@ -386,6 +391,7 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 			error[o-1] += abs(residual[i]);
 		error[o-1] /= data_len-o;
 	}
+
     return true;
 }
 #endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
