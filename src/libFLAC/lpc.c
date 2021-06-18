@@ -293,7 +293,7 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 	FLAC__real predictor[FLAC__MAX_LPC_ORDER];
 	FLAC__int32 residual[FLAC__MAX_BLOCK_SIZE];
 	uint32_t order_list[FLAC__MAX_LPC_ORDER];
-	uint32_t o,i,j,k;
+	uint32_t o,prev_o,i,j,k;
 	int quantization;
 	FLAC__int32 qlp_coeff[FLAC__MAX_LPC_ORDER];
 
@@ -327,8 +327,11 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 		error[i] = 1e33;
 	}
 
+	o = 0;
     for(i = 0; i < num_order; i++){
+		prev_o = o;
 		o = order_list[i];
+
 		// In case iterations ==  0, we do one iteration without building on the last one
         for(j = 0; j < flac_max(iterations,(uint32_t)1); j++){
 			if((o < 3 && j == 0) || iterations == 0){
@@ -341,12 +344,12 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 					predictor[k] = AWb[k];
 				FLAC__lpc_quantize_coefficients(predictor, o, 16, qlp_coeff, &quantization);
 				FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, o, quantization, residual);
-				if(j == 0 && o > 2){
+				if(j == 0 && prev_o > 0){
 					// Residual is used as error of the previous order
-					error[o-2] = 0.0;
+					error[prev_o-1] = 0.0;
 					for(k = o; k < data_len; k++)
-						error[o-2] += abs(residual[k]);
-					error[o-2] /= data_len-o;
+						error[prev_o-1] += abs(residual[k]);
+					error[prev_o-1] /= data_len-o;
 				}
 			}
 			if(!FLAC__lpc_weigh_data(data,residual,AWA,AWb,data_len,o))
