@@ -1737,6 +1737,14 @@ FLAC_API FLAC__bool FLAC__stream_encoder_set_apodization(FLAC__StreamEncoder *en
 				encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.orders = orders;
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_IRLS;
 		}
+		else if(n>10  && 0 == strncmp("irlspost("    , specification, 9))  {
+			if(encoder->protected_->num_apodizations > 0){
+				// We cannot do IRLSPOST first, some apodization should have passed already
+				FLAC__int32 iterations = (FLAC__int32)strtod(specification+9, 0);
+				encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.iterations = iterations;
+				encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_IRLSPOST;
+			}
+		}
 		#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 		else if(n==13 && 0 == strncmp("kaiser_bessel", specification, n))
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_KAISER_BESSEL;
@@ -3551,7 +3559,25 @@ FLAC__bool process_subframe_(
 																		 frame_header->blocksize,
 																		 max_lpc_order,
 																		 encoder->protected_->apodizations[a].parameters.irls.orders,
-																		 encoder->protected_->apodizations[a].parameters.irls.iterations)){
+																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
+																		 0)){
+								continue;
+							}
+							min_lpc_order = 1;
+						}else if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLSPOST
+								 && subframe[_best_subframe]->type == FLAC__SUBFRAME_TYPE_LPC){
+							// Take qlp_coeffs from best subframe and place them in lp_coeff
+							uint32_t i;
+							for(i = 0; i < subframe[_best_subframe]->data.lpc.order; i++)
+								encoder->private_->lp_coeff[subframe[_best_subframe]->data.lpc.order-1][i] = (FLAC__real)(subframe[_best_subframe]->data.lpc.qlp_coeff[i]) / (1<<(subframe[_best_subframe]->data.lpc.quantization_level));
+							if(!FLAC__lpc_iterate_weighted_least_squares(integer_signal,
+																		 encoder->private_->lp_coeff,
+																		 lpc_error,
+																		 frame_header->blocksize,
+																		 subframe[_best_subframe]->data.lpc.order,
+																		 1,
+																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
+																		 1)){
 								continue;
 							}
 							min_lpc_order = 1;

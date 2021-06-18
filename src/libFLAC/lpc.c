@@ -286,7 +286,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 	return true;
 }
 
-FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_restrict data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[], uint32_t data_len, uint32_t max_order, uint32_t num_order, uint32_t iterations)
+FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_restrict data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[], uint32_t data_len, uint32_t max_order, uint32_t num_order, uint32_t iterations, FLAC__bool reuse_lpcoeff)
 {
 	double AWA[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER] = {0};
 	double AWb[FLAC__MAX_LPC_ORDER]  = {0};
@@ -334,17 +334,24 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 
 		// In case iterations ==  0, we do one iteration without building on the last one
         for(j = 0; j < flac_max(iterations,(uint32_t)1); j++){
-			if((o < 3 && j == 0) || iterations == 0){
-				// For orders 1 and 2 or iterations == 0, we start with no weighting
+			if(((o < 3 && j == 0) || iterations == 0 || (i == 0 && j == 0)) && !reuse_lpcoeff){
+				// For orders 1 and 2 or iterations == 0 or i == 0, we start with no weighting, except when reuse_lpcoeff is set
 				for(k = 0; k < data_len; k++){
 					residual[k] = 1;
 				}
 			}else{
-				for(k = 0; k < max_order; k++)
-					predictor[k] = AWb[k];
+				if(reuse_lpcoeff && i == 0 && j == 0){
+					// Copy predictor from lp_coeff
+					for(k = 0; k < max_order; k++)
+						predictor[k] = lp_coeff[o-1][k];
+				}else{
+					// If there is no lpcoeff to reuse, build from AWb
+					for(k = 0; k < max_order; k++)
+						predictor[k] = AWb[k];
+				}
 				FLAC__lpc_quantize_coefficients(predictor, o, 16, qlp_coeff, &quantization);
 				FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, o, quantization, residual);
-				if(j == 0 && prev_o > 0){
+				if(j == 0 && i > 0){
 					// Residual is used as error of the previous order
 					error[prev_o-1] = 0.0;
 					for(k = o; k < data_len; k++)
