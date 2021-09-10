@@ -166,9 +166,10 @@ void FLAC__lpc_compute_lp_coefficients(const double autoc[], uint32_t *max_order
 	}
 }
 #ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
-void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[], uint32_t order)
+void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[], FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], uint32_t order)
 {
-	int32_t j, k, l, order_signed;
+	int32_t i, j, k, l, order_signed;
+	double x[FLAC__MAX_LPC_ORDER] = {0};
 
 	FLAC__ASSERT(order <= FLAC__MAX_LPC_ORDER);
 
@@ -198,13 +199,21 @@ void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[
         b[j] = b[j] / A[j][j];
     }
 
-    // Backward substitution of L'x = b, with x overwriting b
-    for(j = order_signed - 1; j >= 0; j--){
-        for(k = order - 1; k > j; k--){
-            b[j] = b[j] - A[k][j] * b[k];
-        }
-        b[j] = b[j] / A[j][j];
-    }
+    // Up to here, steps are the same for all orders. The next
+    // step has to be done for each order
+
+    for(i = 0; i < order_signed; i++){
+		for(j = 0; j <= i; j++)
+			x[j] = b[j];
+		// Backward substitution of L'x = b
+		for(j = i; j >= 0; j--){
+			for(k = i; k > j; k--){
+				x[j] = x[j] - A[k][j] * x[k];
+			}
+			x[j] = x[j] / A[j][j];
+			lp_coeff[i][j] = x[j];
+		}
+	}
 }
 
 FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__int32 * flac_restrict residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order)
@@ -286,110 +295,35 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 	return true;
 }
 
-FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_restrict data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[], uint32_t data_len, uint32_t max_order, uint32_t num_order, uint32_t iterations, FLAC__bool reuse_lpcoeff)
+FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_restrict data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[], uint32_t data_len, uint32_t max_order, uint32_t iterations, FLAC__bool reuse_lpcoeff)
 {
 	double AWA[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER] = {0};
-	double AWb[FLAC__MAX_LPC_ORDER]  = {0};
-	FLAC__real predictor[FLAC__MAX_LPC_ORDER];
+	double AWb[FLAC__MAX_LPC_ORDER] = {0};
 	FLAC__int32 residual[FLAC__MAX_BLOCK_SIZE];
-	uint32_t order_list[FLAC__MAX_LPC_ORDER];
-	uint32_t o,prev_o,i,j,k;
+	uint32_t i,j,k;
 	int quantization;
 	FLAC__int32 qlp_coeff[FLAC__MAX_LPC_ORDER];
 
-	// First, list the orders to iterate
-	if(max_order < 1 || num_order < 1){
-		return false;
-	}else if(num_order == 1){
-		order_list[0] = max_order;
-	}else if(num_order >= max_order){
-		num_order = max_order;
-		for(i = 0; i < max_order; i++)
-			order_list[i]=i+1;
-	}else if(num_order == (max_order - 1)){
-		for(i = 0; i < (max_order-1); i++)
-			order_list[i]=i+2;
-	}else{
-		order_list[0] = 2;
-		for(i = 1; i < (num_order - 1); i++)
-			order_list[i] = 2+(i*(max_order-2))/(num_order-1);
-		order_list[num_order-1] = max_order;
-	}
-
-	// Set default predictor for first order
-	// Finding a better one usually doesn't pay off
-    lp_coeff[0][0] = 1.0;
-    error[0] = 1e32;
-
-    // Set all error to large value, as default for all
-    // orders that aren't processed
+    // HACK
     for(i = 1; i < FLAC__MAX_LPC_ORDER; i++){
-		error[i] = 1e33;
+		error[i] = 2;
 	}
 
-	o = 0;
-    for(i = 0; i < num_order; i++){
-		prev_o = o;
-		o = order_list[i];
-
-		// In case iterations ==  0, we do one iteration without building on the last one
-        for(j = 0; j < flac_max(iterations,(uint32_t)1); j++){
-			if(((o < 3 && j == 0) || iterations == 0 || (i == 0 && j == 0)) && !reuse_lpcoeff){
-				// For orders 1 and 2 or iterations == 0 or i == 0, we start with no weighting, except when reuse_lpcoeff is set
-				for(k = 0; k < data_len; k++){
-					residual[k] = 1;
-				}
-			}else{
-				if(reuse_lpcoeff && i == 0 && j == 0){
-					// Copy predictor from lp_coeff
-					for(k = 0; k < max_order; k++)
-						predictor[k] = lp_coeff[o-1][k];
-				}else{
-					// If there is no lpcoeff to reuse, build from AWb
-					for(k = 0; k < max_order; k++)
-						predictor[k] = AWb[k];
-				}
-				FLAC__lpc_quantize_coefficients(predictor, o, 16, qlp_coeff, &quantization);
-				FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, o, quantization, residual);
-				if(j == 0 && i > 0){
-					// Residual is used as error of the previous order
-					error[prev_o-1] = 0.0;
-					for(k = o; k < data_len; k++)
-						error[prev_o-1] += abs(residual[k]);
-					error[prev_o-1] /= data_len-o;
-				}
+	for(j = 0; j < flac_max(iterations,(uint32_t)1); j++){
+		if(j == 0 && !reuse_lpcoeff){
+			// For j == 0, we start with no weighting, except when reuse_lpcoeff is set
+			for(k = 0; k < data_len; k++){
+				residual[k] = 1;
 			}
-			if(!FLAC__lpc_weigh_data(data,residual,AWA,AWb,data_len,o))
-				return false;
-            FLAC__lpc_solve_symmetric_matrix(AWA,AWb,o);
-
+		}else{
+			// Copy predictor from lp_coeff
+			FLAC__lpc_quantize_coefficients(lp_coeff[max_order-1], max_order, 16, qlp_coeff, &quantization);
+			FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, max_order, quantization, residual);
 		}
-		for(j = 0; j < o; j++)
-			lp_coeff[o-1][j] = (FLAC__real)AWb[j];
-		if(iterations == 0){
-			// For iterations == 0, we cannot reuse residual data
-			FLAC__lpc_quantize_coefficients(lp_coeff[o-1], o, 16, qlp_coeff, &quantization);
-			FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, o, quantization, residual);
-			error[o-1] = 0.0;
-			for(k = o; k < data_len; k++)
-				error[o-1] += abs(residual[i]);
-			error[o-1] /= data_len-o;
-		}
-    }
+		if(!FLAC__lpc_weigh_data(data,residual,AWA,AWb,data_len,max_order))
+			return false;
+		FLAC__lpc_solve_symmetric_matrix(AWA,AWb,lp_coeff,max_order);
 
-		// Calculate err for highest order, but only when num_order > 1 
-	if(num_order == 1){
-		// If we only did one order, calculating the error would be
-		// a waste of time. We set error to a low enough value that
-		// it won't be rejected outright
-		error[o-1] = 1.0;
-	}else if(iterations != 0){
-		FLAC__lpc_quantize_coefficients(lp_coeff[o-1], o, 16, qlp_coeff, &quantization);
-		FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, o, quantization, residual);
-		error[o-1] = 0.0;
-		for(i = o; i < data_len; i++)
-			error[o-1] += abs(residual[i]);
-		error[o-1] /= data_len-o;
 	}
 
     return true;

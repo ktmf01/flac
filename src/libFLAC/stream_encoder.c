@@ -3558,7 +3558,6 @@ FLAC__bool process_subframe_(
 																		 lpc_error,
 																		 frame_header->blocksize,
 																		 max_lpc_order,
-																		 encoder->protected_->apodizations[a].parameters.irls.orders,
 																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
 																		 0)){
 								continue;
@@ -3575,7 +3574,6 @@ FLAC__bool process_subframe_(
 																		 lpc_error,
 																		 frame_header->blocksize,
 																		 subframe[_best_subframe]->data.lpc.order,
-																		 1,
 																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
 																		 1)){
 								continue;
