@@ -35,7 +35,6 @@
 #endif
 
 #include <math.h>
-#include <stdlib.h>
 
 #include "FLAC/assert.h"
 #include "FLAC/format.h"
@@ -294,6 +293,40 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 		}
 	}
 	return true;
+}
+
+FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_restrict data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[], uint32_t data_len, uint32_t max_order, uint32_t iterations, FLAC__bool reuse_lpcoeff)
+{
+	double AWA[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER] = {0};
+	double AWb[FLAC__MAX_LPC_ORDER] = {0};
+	FLAC__int32 residual[FLAC__MAX_BLOCK_SIZE];
+	uint32_t i,j,k;
+	int quantization;
+	FLAC__int32 qlp_coeff[FLAC__MAX_LPC_ORDER];
+
+    // HACK
+    for(i = 1; i < FLAC__MAX_LPC_ORDER; i++){
+		error[i] = 2;
+	}
+
+	for(j = 0; j < flac_max(iterations,(uint32_t)1); j++){
+		if(j == 0 && !reuse_lpcoeff){
+			// For j == 0, we start with no weighting, except when reuse_lpcoeff is set
+			for(k = 0; k < data_len; k++){
+				residual[k] = 1;
+			}
+		}else{
+			// Copy predictor from lp_coeff
+			FLAC__lpc_quantize_coefficients(lp_coeff[max_order-1], max_order, 16, qlp_coeff, &quantization);
+			FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, max_order, quantization, residual);
+		}
+		if(!FLAC__lpc_weigh_data(data,residual,AWA,AWb,data_len,max_order))
+			return false;
+		FLAC__lpc_solve_symmetric_matrix(AWA,AWb,lp_coeff,max_order);
+
+	}
+
+    return true;
 }
 #endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 

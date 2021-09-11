@@ -122,7 +122,7 @@ static const  struct CompressionLevels {
 	{ true , false,  8, 0, false, false, false, 0, 6, 0, "tukey(5e-1);partial_tukey(2)" },
 	{ true , false, 12, 0, false, false, false, 0, 6, 0, "tukey(5e-1);partial_tukey(2)" },
 	{ true , false, 12, 0, false, false, false, 0, 6, 0, "tukey(5e-1);partial_tukey(2);punchout_tukey(3)" },
-	{ true , false, 12, 0, false, false, true,  0, 6, 0, "tukey(5e-1);partial_tukey(2);punchout_tukey(3);irls(3)" }
+	{ true , false, 12, 0, false, false, true,  0, 6, 0, "tukey(5e-1);partial_tukey(2);punchout_tukey(3);irls(3 11)" }
 	/* here we use locale-independent 5e-1 instead of 0.5 or 0,5 */
 };
 
@@ -184,6 +184,7 @@ static uint32_t evaluate_fixed_subframe_(
 	uint32_t blocksize,
 	uint32_t subframe_bps,
 	uint32_t order,
+	uint32_t rice_parameter,
 	uint32_t rice_parameter_limit,
 	uint32_t min_partition_order,
 	uint32_t max_partition_order,
@@ -205,6 +206,7 @@ static uint32_t evaluate_lpc_subframe_(
 	uint32_t subframe_bps,
 	uint32_t order,
 	uint32_t qlp_coeff_precision,
+	uint32_t rice_parameter,
 	uint32_t rice_parameter_limit,
 	uint32_t min_partition_order,
 	uint32_t max_partition_order,
@@ -230,6 +232,7 @@ static uint32_t find_best_partition_order_(
 	uint32_t raw_bits_per_partition[],
 	uint32_t residual_samples,
 	uint32_t predictor_order,
+	uint32_t rice_parameter,
 	uint32_t rice_parameter_limit,
 	uint32_t min_partition_order,
 	uint32_t max_partition_order,
@@ -266,6 +269,7 @@ static FLAC__bool set_partitioned_rice_(
 	const uint32_t raw_bits_per_partition[],
 	const uint32_t residual_samples,
 	const uint32_t predictor_order,
+	const uint32_t suggested_rice_parameter,
 	const uint32_t rice_parameter_limit,
 	const uint32_t rice_parameter_search_dist,
 	const uint32_t partition_order,
@@ -1723,8 +1727,14 @@ FLAC_API FLAC__bool FLAC__stream_encoder_set_apodization(FLAC__StreamEncoder *en
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_HANN;
 		#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 		else if(n>6   && 0 == strncmp("irls("       , specification, 5)) {
-			FLAC__int32 iterations = (FLAC__int32)strtod(specification+5, 0);
+			char* separationpointer;
+			FLAC__int32 iterations = (FLAC__int32)strtod(specification+5, &separationpointer);
+			FLAC__int32 orders =     (FLAC__int32)strtod(separationpointer, 0);
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.iterations = iterations;
+			if(orders == 0)
+				encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.orders = 1;
+			else
+				encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.orders = orders;
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_IRLS;
 		}
 		else if(n>10  && 0 == strncmp("irlspost("    , specification, 9))  {
@@ -3429,11 +3439,9 @@ FLAC__bool process_subframe_(
 	uint32_t min_qlp_coeff_precision, max_qlp_coeff_precision, qlp_coeff_precision;
 #endif
 	uint32_t min_fixed_order, max_fixed_order, guess_fixed_order, fixed_order;
+	uint32_t rice_parameter;
 	uint32_t _candidate_bits, _best_bits;
 	uint32_t _best_subframe;
-#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
-	uint32_t _irls_subframe = 0;
-#endif
 	/* only use RICE2 partitions if stream bps > 16 */
 	const uint32_t rice_parameter_limit = FLAC__stream_encoder_get_bits_per_sample(encoder) > 16? FLAC__ENTROPY_CODING_METHOD_PARTITIONED_RICE2_ESCAPE_PARAMETER : FLAC__ENTROPY_CODING_METHOD_PARTITIONED_RICE_ESCAPE_PARAMETER;
 
@@ -3494,10 +3502,19 @@ FLAC__bool process_subframe_(
 #ifndef FLAC__INTEGER_ONLY_LIBRARY
 					if(fixed_residual_bits_per_sample[fixed_order] >= (float)subframe_bps)
 						continue; /* don't even try */
+					rice_parameter = (fixed_residual_bits_per_sample[fixed_order] > 0.0)? (uint32_t)(fixed_residual_bits_per_sample[fixed_order]+0.5) : 0; /* 0.5 is for rounding */
 #else
 					if(FLAC__fixedpoint_trunc(fixed_residual_bits_per_sample[fixed_order]) >= (int)subframe_bps)
 						continue; /* don't even try */
+					rice_parameter = (fixed_residual_bits_per_sample[fixed_order] > FLAC__FP_ZERO)? (uint32_t)FLAC__fixedpoint_trunc(fixed_residual_bits_per_sample[fixed_order]+FLAC__FP_ONE_HALF) : 0; /* 0.5 is for rounding */
 #endif
+					rice_parameter++; /* to account for the signed->uint32_t conversion during rice coding */
+					if(rice_parameter >= rice_parameter_limit) {
+#ifndef NDEBUG
+						fprintf(stderr, "clipping rice_parameter (%u -> %u) @0\n", rice_parameter, rice_parameter_limit - 1);
+#endif
+						rice_parameter = rice_parameter_limit - 1;
+					}
 					_candidate_bits =
 						evaluate_fixed_subframe_(
 							encoder,
@@ -3508,6 +3525,7 @@ FLAC__bool process_subframe_(
 							frame_header->blocksize,
 							subframe_bps,
 							fixed_order,
+							rice_parameter,
 							rice_parameter_limit,
 							min_partition_order,
 							max_partition_order,
@@ -3531,37 +3549,38 @@ FLAC__bool process_subframe_(
 				else
 					max_lpc_order = encoder->protected_->max_lpc_order;
 				if(max_lpc_order > 0) {
-					uint32_t a, iterations = 0;
+					uint32_t a;
 					for (a = 0; a < encoder->protected_->num_apodizations; a++) {
-#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
-						if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS ||
-								 (encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLSPOST
-								 && subframe[_best_subframe]->type == FLAC__SUBFRAME_TYPE_LPC)){
-							double AWA[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER] = {0};
-							double AWb[FLAC__MAX_LPC_ORDER] = {0};
-							if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS
-								 && iterations == 0){
-								// This is the first iteration, we need to start with a
-								// neutral weighting, which can be accomplished with a
-								// residual that is 1 everywhere
-								_irls_subframe = !_best_subframe;
-								for(uint32_t k = 0; k < frame_header->blocksize; k++)
-									*residual[_irls_subframe] = 1;
-							}else if(iterations == 0 || _irls_subframe == _best_subframe) {
-								// This is the first iteration building on a previous
-								// Yule-Walker LPC frame, or the current _irls_subframe
-								// is _best_subframe. In both cases, we need to copy
-								// the residual so we can do IRLS in !_best_subframe
-								_irls_subframe = !_best_subframe;
-								for(uint32_t k = 0; k < frame_header->blocksize; k++)
-									*residual[_irls_subframe] = *residual[_best_subframe];
-							}
-							if(!FLAC__lpc_weigh_data(integer_signal,residual[_irls_subframe],AWA,AWb,frame_header->blocksize,max_lpc_order))
+						#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+						if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS){
+							if(!FLAC__lpc_iterate_weighted_least_squares(integer_signal,
+																		 encoder->private_->lp_coeff,
+																		 lpc_error,
+																		 frame_header->blocksize,
+																		 max_lpc_order,
+																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
+																		 0)){
 								continue;
-							FLAC__lpc_solve_symmetric_matrix(AWA,AWb,encoder->private_->lp_coeff,max_lpc_order);
+							}
+							min_lpc_order = 1;
+						}else if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLSPOST
+								 && subframe[_best_subframe]->type == FLAC__SUBFRAME_TYPE_LPC){
+							// Take qlp_coeffs from best subframe and place them in lp_coeff
+							uint32_t i;
+							for(i = 0; i < subframe[_best_subframe]->data.lpc.order; i++)
+								encoder->private_->lp_coeff[subframe[_best_subframe]->data.lpc.order-1][i] = (FLAC__real)(subframe[_best_subframe]->data.lpc.qlp_coeff[i]) / (1<<(subframe[_best_subframe]->data.lpc.quantization_level));
+							if(!FLAC__lpc_iterate_weighted_least_squares(integer_signal,
+																		 encoder->private_->lp_coeff,
+																		 lpc_error,
+																		 frame_header->blocksize,
+																		 subframe[_best_subframe]->data.lpc.order,
+																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
+																		 1)){
+								continue;
+							}
 							min_lpc_order = 1;
 						}else
-#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
+						#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 						{
 							FLAC__lpc_window_data(integer_signal, encoder->private_->window[a], encoder->private_->windowed_signal, frame_header->blocksize);
 							encoder->private_->local_lpc_compute_autocorrelation(encoder->private_->windowed_signal, frame_header->blocksize, max_lpc_order+1, autoc);
@@ -3590,14 +3609,23 @@ FLAC__bool process_subframe_(
 						if(max_lpc_order >= frame_header->blocksize)
 							max_lpc_order = frame_header->blocksize - 1;
 						for(lpc_order = min_lpc_order; lpc_order <= max_lpc_order; lpc_order++) {
-#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
-							if(encoder->protected_->apodizations[a].type != FLAC__APODIZATION_IRLS &&
-							   encoder->protected_->apodizations[a].type != FLAC__APODIZATION_IRLSPOST)
-#endif
+							#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+							if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS){
+								lpc_residual_bits_per_sample = FLAC__lpc_compute_expected_bits_per_residual_sample_with_abs_error(lpc_error[lpc_order-1]);
+							}else
+							#endif
 							{
 								lpc_residual_bits_per_sample = FLAC__lpc_compute_expected_bits_per_residual_sample(lpc_error[lpc_order-1], frame_header->blocksize-lpc_order);
-								if(lpc_residual_bits_per_sample >= (double)subframe_bps)
-									continue; /* don't even try */
+							}
+							if(lpc_residual_bits_per_sample >= (double)subframe_bps)
+								continue; /* don't even try */
+							rice_parameter = (lpc_residual_bits_per_sample > 0.0)? (uint32_t)(lpc_residual_bits_per_sample+0.5) : 0; /* 0.5 is for rounding */
+							rice_parameter++; /* to account for the signed->uint32_t conversion during rice coding */
+							if(rice_parameter >= rice_parameter_limit) {
+#ifndef NDEBUG
+								fprintf(stderr, "clipping rice_parameter (%u -> %u) @1\n", rice_parameter, rice_parameter_limit - 1);
+#endif
+								rice_parameter = rice_parameter_limit - 1;
 							}
 							if(encoder->protected_->do_qlp_coeff_prec_search) {
 								min_qlp_coeff_precision = FLAC__MIN_QLP_COEFF_PRECISION;
@@ -3625,6 +3653,7 @@ FLAC__bool process_subframe_(
 										subframe_bps,
 										lpc_order,
 										qlp_coeff_precision,
+										rice_parameter,
 										rice_parameter_limit,
 										min_partition_order,
 										max_partition_order,
@@ -3646,17 +3675,6 @@ FLAC__bool process_subframe_(
 							max_lpc_order = frame_header->blocksize-1;
 						else
 							max_lpc_order = encoder->protected_->max_lpc_order;
-#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
-						if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS ||
-							   encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLSPOST){
-							if(iterations < encoder->protected_->apodizations[a].parameters.irls.iterations){
-								iterations++;
-								a--;
-							}else{
-								iterations = 0;
-							}
-						}
-#endif
 					}
 				}
 			}
@@ -3779,6 +3797,7 @@ uint32_t evaluate_fixed_subframe_(
 	uint32_t blocksize,
 	uint32_t subframe_bps,
 	uint32_t order,
+	uint32_t rice_parameter,
 	uint32_t rice_parameter_limit,
 	uint32_t min_partition_order,
 	uint32_t max_partition_order,
@@ -3807,6 +3826,7 @@ uint32_t evaluate_fixed_subframe_(
 			raw_bits_per_partition,
 			residual_samples,
 			order,
+			rice_parameter,
 			rice_parameter_limit,
 			min_partition_order,
 			max_partition_order,
@@ -3841,6 +3861,7 @@ uint32_t evaluate_lpc_subframe_(
 	uint32_t subframe_bps,
 	uint32_t order,
 	uint32_t qlp_coeff_precision,
+	uint32_t rice_parameter,
 	uint32_t rice_parameter_limit,
 	uint32_t min_partition_order,
 	uint32_t max_partition_order,
@@ -3888,6 +3909,7 @@ uint32_t evaluate_lpc_subframe_(
 			raw_bits_per_partition,
 			residual_samples,
 			order,
+			rice_parameter,
 			rice_parameter_limit,
 			min_partition_order,
 			max_partition_order,
@@ -3946,6 +3968,7 @@ uint32_t find_best_partition_order_(
 	uint32_t raw_bits_per_partition[],
 	uint32_t residual_samples,
 	uint32_t predictor_order,
+	uint32_t rice_parameter,
 	uint32_t rice_parameter_limit,
 	uint32_t min_partition_order,
 	uint32_t max_partition_order,
@@ -3982,6 +4005,7 @@ uint32_t find_best_partition_order_(
 					raw_bits_per_partition+sum,
 					residual_samples,
 					predictor_order,
+					rice_parameter,
 					rice_parameter_limit,
 					rice_parameter_search_dist,
 					(uint32_t)partition_order,
@@ -4199,6 +4223,7 @@ FLAC__bool set_partitioned_rice_(
 	const uint32_t raw_bits_per_partition[],
 	const uint32_t residual_samples,
 	const uint32_t predictor_order,
+	const uint32_t suggested_rice_parameter,
 	const uint32_t rice_parameter_limit,
 	const uint32_t rice_parameter_search_dist,
 	const uint32_t partition_order,
@@ -4224,7 +4249,58 @@ FLAC__bool set_partitioned_rice_(
 	parameters = partitioned_rice_contents->parameters;
 	raw_bits = partitioned_rice_contents->raw_bits;
 
-	{
+	if(partition_order == 0) {
+		best_partition_bits = (uint32_t)(-1);
+#ifdef ENABLE_RICE_PARAMETER_SEARCH
+		if(rice_parameter_search_dist) {
+			if(suggested_rice_parameter < rice_parameter_search_dist)
+				min_rice_parameter = 0;
+			else
+				min_rice_parameter = suggested_rice_parameter - rice_parameter_search_dist;
+			max_rice_parameter = suggested_rice_parameter + rice_parameter_search_dist;
+			if(max_rice_parameter >= rice_parameter_limit) {
+#ifndef NDEBUG
+				fprintf(stderr, "clipping rice_parameter (%u -> %u) @5\n", max_rice_parameter, rice_parameter_limit - 1);
+#endif
+				max_rice_parameter = rice_parameter_limit - 1;
+			}
+		}
+		else
+			min_rice_parameter = max_rice_parameter = suggested_rice_parameter;
+
+		for(rice_parameter = min_rice_parameter; rice_parameter <= max_rice_parameter; rice_parameter++) {
+#else
+			rice_parameter = suggested_rice_parameter;
+#endif
+#ifdef EXACT_RICE_BITS_CALCULATION
+			partition_bits = count_rice_bits_in_partition_(rice_parameter, residual_samples, residual);
+#else
+			partition_bits = count_rice_bits_in_partition_(rice_parameter, residual_samples, abs_residual_partition_sums[0]);
+#endif
+			if(partition_bits < best_partition_bits) {
+				best_rice_parameter = rice_parameter;
+				best_partition_bits = partition_bits;
+			}
+#ifdef ENABLE_RICE_PARAMETER_SEARCH
+		}
+#endif
+		if(search_for_escapes) {
+			partition_bits = FLAC__ENTROPY_CODING_METHOD_PARTITIONED_RICE2_PARAMETER_LEN + FLAC__ENTROPY_CODING_METHOD_PARTITIONED_RICE_RAW_LEN + raw_bits_per_partition[0] * residual_samples;
+			if(partition_bits <= best_partition_bits) {
+				raw_bits[0] = raw_bits_per_partition[0];
+				best_rice_parameter = 0; /* will be converted to appropriate escape parameter later */
+				best_partition_bits = partition_bits;
+			}
+			else
+				raw_bits[0] = 0;
+		}
+		parameters[0] = best_rice_parameter;
+		if(best_partition_bits < UINT_MAX - bits_) // To make sure _bits doesn't overflow
+			bits_ += best_partition_bits;
+		else
+			bits_ = UINT_MAX;
+	}
+	else {
 		uint32_t partition, residual_sample;
 		uint32_t partition_samples;
 		FLAC__uint64 mean, k;
