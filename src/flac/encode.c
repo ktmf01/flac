@@ -2218,7 +2218,7 @@ FLAC__bool EncoderSession_format_is_iff(const EncoderSession *e)
 FLAC__bool convert_to_seek_table_template(const char *requested_seek_points, int num_requested_seek_points, FLAC__StreamMetadata *cuesheet, EncoderSession *e)
 {
 	const FLAC__bool only_placeholders = e->is_stdout;
-	FLAC__bool has_real_points;
+	FLAC__bool has_real_points = false;
 
 	if(num_requested_seek_points == 0 && 0 == cuesheet)
 		return true;
