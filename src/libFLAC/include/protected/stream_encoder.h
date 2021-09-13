@@ -85,7 +85,7 @@ typedef struct {
 #ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 		struct {
 			FLAC__real iterations;
-			FLAC__real trimming;
+			FLAC__real orders;
 		} irls;
 #endif
 	} parameters;
