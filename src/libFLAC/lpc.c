@@ -35,6 +35,7 @@
 #endif
 
 #include <math.h>
+#include <stdlib.h>
 
 #include "FLAC/assert.h"
 #include "FLAC/format.h"
@@ -274,8 +275,8 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 
 	// This loop runs over samples instead of over orders
 	// because of data locality
-	for(int i = 0; i < data_len; i++){
-		for(int j = 0; j < order; j++){
+	for(int i = 0; i < (int)data_len; i++){
+		for(int j = 0; j < (int)order; j++){
 			for(int k = 0; k <= j; k++){
 				AWA[j][k] += weight[i]*data[i-j-1]*data[i-k-1];
 			}
@@ -294,31 +295,27 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 	return true;
 }
 
-FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_restrict data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[], uint32_t data_len, uint32_t max_order, uint32_t iterations, FLAC__bool reuse_lpcoeff)
+FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_restrict data, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], uint32_t data_len, uint32_t max_order, uint32_t iterations, void (*local_lpc_compute_residual_from_qlp_coefficients_64bit)(const FLAC__int32[], uint32_t, const FLAC__int32[], uint32_t order, int lp_quantization, FLAC__int32[]), FLAC__bool reuse_lpcoeff)
 {
 	double AWA[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER] = {0};
 	double AWb[FLAC__MAX_LPC_ORDER] = {0};
 	FLAC__int32 residual[FLAC__MAX_BLOCK_SIZE];
-	uint32_t i,j,k;
+	uint32_t i,j;
 	int quantization;
 	FLAC__int32 qlp_coeff[FLAC__MAX_LPC_ORDER];
 
-    // HACK
-    for(i = 1; i < FLAC__MAX_LPC_ORDER; i++){
-		error[i] = 2;
-	}
 	if(data_len <= max_order)
 		return false;
-	for(j = 0; j < flac_max(iterations,(uint32_t)1); j++){
-		if(j == 0 && !reuse_lpcoeff){
-			// For j == 0, we start with no weighting, except when reuse_lpcoeff is set
-			for(k = 0; k < data_len; k++){
-				residual[k] = 1;
+	for(i = 0; i < flac_max(iterations,(uint32_t)1); i++){
+		if(i == 0 && !reuse_lpcoeff){
+			// For i == 0, we start with no weighting, except when reuse_lpcoeff is set
+			for(j = 0; j < data_len; j++){
+				residual[j] = 1;
 			}
 		}else{
 			// Copy predictor from lp_coeff
 			FLAC__lpc_quantize_coefficients(lp_coeff[max_order-1], max_order, 16, qlp_coeff, &quantization);
-			FLAC__lpc_compute_residual_from_qlp_coefficients(data+max_order, (data_len-max_order), qlp_coeff, max_order, quantization, residual);
+			local_lpc_compute_residual_from_qlp_coefficients_64bit(data+max_order, (data_len-max_order), qlp_coeff, max_order, quantization, residual);
 		}
 		if(!FLAC__lpc_weigh_data(data+max_order,residual,AWA,AWb,(data_len-max_order),max_order))
 			return false;

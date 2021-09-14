@@ -3540,10 +3540,10 @@ FLAC__bool process_subframe_(
 						if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS){
 							if(!FLAC__lpc_iterate_weighted_least_squares(integer_signal,
 																		 encoder->private_->lp_coeff,
-																		 lpc_error,
 																		 frame_header->blocksize,
 																		 max_lpc_order,
 																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
+																		 encoder->private_->local_lpc_compute_residual_from_qlp_coefficients_64bit,
 																		 0)){
 								continue;
 							}
@@ -3556,10 +3556,10 @@ FLAC__bool process_subframe_(
 								encoder->private_->lp_coeff[subframe[_best_subframe]->data.lpc.order-1][i] = (FLAC__real)(subframe[_best_subframe]->data.lpc.qlp_coeff[i]) / (1<<(subframe[_best_subframe]->data.lpc.quantization_level));
 							if(!FLAC__lpc_iterate_weighted_least_squares(integer_signal,
 																		 encoder->private_->lp_coeff,
-																		 lpc_error,
 																		 frame_header->blocksize,
-																		 subframe[_best_subframe]->data.lpc.order,
+																		 max_lpc_order,
 																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
+																		 encoder->private_->local_lpc_compute_residual_from_qlp_coefficients_64bit,
 																		 1)){
 								continue;
 							}
