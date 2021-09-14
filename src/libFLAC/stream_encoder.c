@@ -3630,7 +3630,6 @@ FLAC__bool process_subframe_(
 										subframe_bps,
 										lpc_order,
 										qlp_coeff_precision,
-										rice_parameter,
 										rice_parameter_limit,
 										min_partition_order,
 										max_partition_order,

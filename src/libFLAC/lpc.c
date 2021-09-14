@@ -218,13 +218,12 @@ void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[
 
 FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__int32 * flac_restrict residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order)
 {
-	uint32_t i, j, k;
 	FLAC__real irls_moving_average_sum, irls_moving_average;
 	FLAC__real weight[FLAC__MAX_BLOCK_SIZE];
 
 	// First, set AWA and AWb to 0
-	for(j = 0; j < order; j++){
-		for(k = 0; k <= j; k++){
+	for(uint32_t j = 0; j < order; j++){
+		for(uint32_t k = 0; k <= j; k++){
 			AWA[j][k] = 0;
 		}
 		AWb[j] = 0;
@@ -236,7 +235,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 	// of samples as these contain invalid data
 
 	irls_moving_average_sum = 0.0f;
-	for(i = order; i < data_len && i < (IRLS_MOVING_AVERAGE_WINDOW+order); i++){
+	for(uint32_t i = 0; i < data_len && i < (IRLS_MOVING_AVERAGE_WINDOW); i++){
 		irls_moving_average_sum += abs(residual[i]);
 	}
 
@@ -245,7 +244,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 	// we're reusing the residual as the weighing variable
 	// to speed things up
 
- 	for(i = order; i < data_len; i++){
+	for(uint32_t i = 0; i < data_len; i++){
 		residual[i] = abs(residual[i]);
 		irls_moving_average = irls_moving_average_sum/IRLS_MOVING_AVERAGE_WINDOW;
 		if(residual[i] < 2)
@@ -267,7 +266,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 
 		// Update moving average when current sample is at least half a
 		// window length away from beginning or end
-		if(i >= order+IRLS_MOVING_AVERAGE_WINDOW/2 && (i+IRLS_MOVING_AVERAGE_WINDOW/2) < data_len){
+		if(i >= IRLS_MOVING_AVERAGE_WINDOW/2 && (i+IRLS_MOVING_AVERAGE_WINDOW/2) < data_len){
 			irls_moving_average_sum += abs(residual[i+IRLS_MOVING_AVERAGE_WINDOW/2]);
 			irls_moving_average_sum -= residual[i-IRLS_MOVING_AVERAGE_WINDOW/2];
 		}
@@ -275,16 +274,16 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 
 	// This loop runs over samples instead of over orders
 	// because of data locality
-	for(i = order; i < data_len; i++){
-		for(j = 0; j < order; j++){
-			for(k = 0; k <= j; k++){
+	for(int i = 0; i < data_len; i++){
+		for(int j = 0; j < order; j++){
+			for(int k = 0; k <= j; k++){
 				AWA[j][k] += weight[i]*data[i-j-1]*data[i-k-1];
 			}
 			AWb[j] += weight[i]*data[i-j-1]*data[i];
        		}
 	}
 
-	for(i = 0; i < order; i++){
+	for(uint32_t i = 0; i < order; i++){
         	if(AWA[i][i] < 1){
 			return false;
  		}
@@ -308,7 +307,8 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
     for(i = 1; i < FLAC__MAX_LPC_ORDER; i++){
 		error[i] = 2;
 	}
-
+	if(data_len <= max_order)
+		return false;
 	for(j = 0; j < flac_max(iterations,(uint32_t)1); j++){
 		if(j == 0 && !reuse_lpcoeff){
 			// For j == 0, we start with no weighting, except when reuse_lpcoeff is set
@@ -318,9 +318,9 @@ FLAC__bool FLAC__lpc_iterate_weighted_least_squares(const FLAC__int32 * flac_res
 		}else{
 			// Copy predictor from lp_coeff
 			FLAC__lpc_quantize_coefficients(lp_coeff[max_order-1], max_order, 16, qlp_coeff, &quantization);
-			FLAC__lpc_compute_residual_from_qlp_coefficients(data, data_len, qlp_coeff, max_order, quantization, residual);
+			FLAC__lpc_compute_residual_from_qlp_coefficients(data+max_order, (data_len-max_order), qlp_coeff, max_order, quantization, residual);
 		}
-		if(!FLAC__lpc_weigh_data(data,residual,AWA,AWb,data_len,max_order))
+		if(!FLAC__lpc_weigh_data(data+max_order,residual,AWA,AWb,(data_len-max_order),max_order))
 			return false;
 		FLAC__lpc_solve_symmetric_matrix(AWA,AWb,lp_coeff,max_order);
 
