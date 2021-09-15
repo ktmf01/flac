@@ -56,7 +56,6 @@ typedef enum {
 	FLAC__APODIZATION_HANN,
 #ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 	FLAC__APODIZATION_IRLS,
-	FLAC__APODIZATION_IRLSPOST,
 #endif
 	FLAC__APODIZATION_KAISER_BESSEL,
 	FLAC__APODIZATION_NUTTALL,
@@ -85,7 +84,8 @@ typedef struct {
 #ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 		struct {
 			FLAC__real iterations;
-			FLAC__real orders;
+			FLAC__bool post;
+			FLAC__bool precisionsearch;
 		} irls;
 #endif
 	} parameters;

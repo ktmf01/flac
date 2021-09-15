@@ -1723,23 +1723,25 @@ FLAC_API FLAC__bool FLAC__stream_encoder_set_apodization(FLAC__StreamEncoder *en
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_HANN;
 		#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 		else if(n>6   && 0 == strncmp("irls("       , specification, 5)) {
-			char* separationpointer;
-			FLAC__int32 iterations = (FLAC__int32)strtod(specification+5, &separationpointer);
-			FLAC__int32 orders =     (FLAC__int32)strtod(separationpointer, 0);
+			FLAC__int32 iterations = (FLAC__int32)strtod(specification+5, 0);
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.iterations = iterations;
-			if(orders == 0)
-				encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.orders = 1;
-			else
-				encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.orders = orders;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.post = 0;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.precisionsearch = 0;
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_IRLS;
 		}
 		else if(n>10  && 0 == strncmp("irlspost("    , specification, 9))  {
-			if(encoder->protected_->num_apodizations > 0){
-				// We cannot do IRLSPOST first, some apodization should have passed already
-				FLAC__int32 iterations = (FLAC__int32)strtod(specification+9, 0);
-				encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.iterations = iterations;
-				encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_IRLSPOST;
-			}
+			FLAC__int32 iterations = (FLAC__int32)strtod(specification+9, 0);
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.iterations = iterations;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.post = 1;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.precisionsearch = 0;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_IRLS;
+		}
+		else if(n>12  && 0 == strncmp("irlspost-p("    , specification, 11))  {
+			FLAC__int32 iterations = (FLAC__int32)strtod(specification+11, 0);
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.iterations = iterations;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.post = 1;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.irls.precisionsearch = 1;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_IRLS;
 		}
 		#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 		else if(n==13 && 0 == strncmp("kaiser_bessel", specification, n))
@@ -3538,29 +3540,28 @@ FLAC__bool process_subframe_(
 					for (a = 0; a < encoder->protected_->num_apodizations; a++) {
 						#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 						if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS){
-							if(!FLAC__lpc_iterate_weighted_least_squares(integer_signal,
-																		 encoder->private_->lp_coeff,
-																		 frame_header->blocksize,
-																		 max_lpc_order,
-																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
-																		 encoder->private_->local_lpc_compute_residual_from_qlp_coefficients_64bit,
-																		 0)){
-								continue;
+							if(encoder->protected_->apodizations[a].parameters.irls.post){
+								uint32_t i;
+								if(a > 0 && encoder->protected_->apodizations[a-1].type == FLAC__APODIZATION_IRLS){
+									// Continue with existing lp_coeff
+								}else if(subframe[_best_subframe]->type == FLAC__SUBFRAME_TYPE_LPC){
+									// Take qlp_coeffs from best subframe and place them in lp_coeff
+									for(i = 0; i < subframe[_best_subframe]->data.lpc.order; i++)
+										encoder->private_->lp_coeff[max_lpc_order-1][i] = (FLAC__real)(subframe[_best_subframe]->data.lpc.qlp_coeff[i]) / (1<<(subframe[_best_subframe]->data.lpc.quantization_level));
+									for(;i<max_lpc_order; i++)
+										encoder->private_->lp_coeff[max_lpc_order-1][i] = 0.0f;
+								}else{
+									// Nothing to do irlspost on, set to 0 for next step
+									encoder->protected_->apodizations[a].parameters.irls.post = 0;
+								}
 							}
-							min_lpc_order = 1;
-						}else if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLSPOST
-								 && subframe[_best_subframe]->type == FLAC__SUBFRAME_TYPE_LPC){
-							// Take qlp_coeffs from best subframe and place them in lp_coeff
-							uint32_t i;
-							for(i = 0; i < subframe[_best_subframe]->data.lpc.order; i++)
-								encoder->private_->lp_coeff[subframe[_best_subframe]->data.lpc.order-1][i] = (FLAC__real)(subframe[_best_subframe]->data.lpc.qlp_coeff[i]) / (1<<(subframe[_best_subframe]->data.lpc.quantization_level));
 							if(!FLAC__lpc_iterate_weighted_least_squares(integer_signal,
 																		 encoder->private_->lp_coeff,
 																		 frame_header->blocksize,
 																		 max_lpc_order,
 																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
 																		 encoder->private_->local_lpc_compute_residual_from_qlp_coefficients_64bit,
-																		 1)){
+																		 encoder->protected_->apodizations[a].parameters.irls.post)){
 								continue;
 							}
 							min_lpc_order = 1;
@@ -3595,8 +3596,7 @@ FLAC__bool process_subframe_(
 							max_lpc_order = frame_header->blocksize - 1;
 						for(lpc_order = min_lpc_order; lpc_order <= max_lpc_order; lpc_order++) {
 #ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
-							if(encoder->protected_->apodizations[a].type != FLAC__APODIZATION_IRLS &&
-							   encoder->protected_->apodizations[a].type != FLAC__APODIZATION_IRLSPOST)
+							if(encoder->protected_->apodizations[a].type != FLAC__APODIZATION_IRLS)
 #endif
 							{
 								lpc_residual_bits_per_sample = FLAC__lpc_compute_expected_bits_per_residual_sample(lpc_error[lpc_order-1], frame_header->blocksize-lpc_order);
@@ -3604,7 +3604,13 @@ FLAC__bool process_subframe_(
 									continue; /* don't even try */
 							}
 
+#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
+							if(encoder->protected_->do_qlp_coeff_prec_search ||
+							   (encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS &&
+							   encoder->protected_->apodizations[a].parameters.irls.precisionsearch)) {
+#else
 							if(encoder->protected_->do_qlp_coeff_prec_search) {
+#endif
 								min_qlp_coeff_precision = FLAC__MIN_QLP_COEFF_PRECISION;
 								/* try to keep qlp coeff precision such that only 32-bit math is required for decode of <=16bps(+1bps for side channel) streams */
 								if(subframe_bps <= 17) {
