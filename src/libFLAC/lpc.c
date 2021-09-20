@@ -294,12 +294,40 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 	// Add some hints for autovectorization
 	if(order == 12 && data_len > 1000){
 		for(int i = 0; i < (int)data_len; i++){
+#if 1
+			AWA[0][0] += weight[i]*data_precast[i-1]*data_precast[i-1];
+			for(int k = 0; k <= 1; k++)
+				AWA[1][k] += weight[i]*data_precast[i-2]*data_precast[i-k-1];
+			for(int k = 0; k <= 2; k++)
+				AWA[2][k] += weight[i]*data_precast[i-3]*data_precast[i-k-1];
+			for(int k = 0; k <= 3; k++)
+				AWA[3][k] += weight[i]*data_precast[i-4]*data_precast[i-k-1];
+			for(int k = 0; k <= 4; k++)
+				AWA[4][k] += weight[i]*data_precast[i-5]*data_precast[i-k-1];
+			for(int k = 0; k <= 5; k++)
+				AWA[5][k] += weight[i]*data_precast[i-6]*data_precast[i-k-1];
+			for(int k = 0; k <= 6; k++)
+				AWA[6][k] += weight[i]*data_precast[i-7]*data_precast[i-k-1];
+			for(int k = 0; k <= 7; k++)
+				AWA[7][k] += weight[i]*data_precast[i-8]*data_precast[i-k-1];
+			for(int k = 0; k <= 8; k++)
+				AWA[8][k] += weight[i]*data_precast[i-9]*data_precast[i-k-1];
+			for(int k = 0; k <= 9; k++)
+				AWA[9][k] += weight[i]*data_precast[i-10]*data_precast[i-k-1];
+			for(int k = 0; k <= 10; k++)
+				AWA[10][k] += weight[i]*data_precast[i-11]*data_precast[i-k-1];
+			for(int k = 0; k <= 11; k++)
+				AWA[11][k] += weight[i]*data_precast[i-12]*data_precast[i-k-1];
+			for(int j = 0; j < (int)order; j++)
+				AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
+#else
 			for(int j = 0; j < (int)order; j++){
 				for(int k = 0; k <= j; k++){
 					AWA[j][k] += weight[i]*data_precast[i-j-1]*data_precast[i-k-1];
 				}
 				AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
 			}
+#endif
 		}
 	}else{
 		for(int i = 0; i < (int)data_len; i++){
