@@ -219,15 +219,15 @@ void FLAC__lpc_solve_symmetric_matrix(double A[][FLAC__MAX_LPC_ORDER], double b[
 
 FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__int32 * flac_restrict residual, double AWA[][FLAC__MAX_LPC_ORDER], double AWb[], uint32_t data_len, uint32_t order)
 {
-	FLAC__real irls_moving_average_sum, irls_moving_average;
-	FLAC__real weight[FLAC__MAX_BLOCK_SIZE];
+	double irls_moving_average_sum, irls_moving_average;
+	double weight[FLAC__MAX_BLOCK_SIZE];
 
 	// First, set AWA and AWb to 0
 	for(uint32_t j = 0; j < order; j++){
 		for(uint32_t k = 0; k <= j; k++){
-			AWA[j][k] = 0;
+			AWA[j][k] = 0.0;
 		}
-		AWb[j] = 0;
+		AWb[j] = 0.0;
 	}
 
 	// We need a moving average to set the weighting cut-offs.
@@ -235,7 +235,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 	// This needs a headstart. We need to skip the first "order" number
 	// of samples as these contain invalid data
 
-	irls_moving_average_sum = 0.0f;
+	irls_moving_average_sum = 0.0;
 	for(uint32_t i = 0; i < data_len && i < (IRLS_MOVING_AVERAGE_WINDOW); i++){
 		irls_moving_average_sum += abs(residual[i]);
 	}
@@ -281,7 +281,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 				AWA[j][k] += weight[i]*data[i-j-1]*data[i-k-1];
 			}
 			AWb[j] += weight[i]*data[i-j-1]*data[i];
-       		}
+		}
 	}
 
 	for(uint32_t i = 0; i < order; i++){
