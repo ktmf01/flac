@@ -221,7 +221,9 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 {
 	double irls_moving_average_sum, irls_moving_average;
 	double weight[FLAC__MAX_BLOCK_SIZE];
-	double data_precast[FLAC__MAX_BLOCK_SIZE];
+	double data_precast_full[FLAC__MAX_BLOCK_SIZE];
+	double* data_precast = &data_precast_full[0]+order;
+	double AA[FLAC__MAX_LPC_ORDER][FLAC__MAX_LPC_ORDER];
 
 	// First, set AWA and AWb to 0
 	for(uint32_t j = 0; j < order; j++){
@@ -280,6 +282,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 
 	// This loop runs over samples instead of over orders
 	// because of data locality
+#if 1
 	for(int i = 0; i < (int)data_len; i++){
 		for(int j = 0; j < (int)order; j++){
 			for(int k = 0; k <= j; k++){
@@ -288,6 +291,24 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 			AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
 		}
 	}
+#else
+	for(int j = 0; j < (int)order; j++)
+		for(int k = 0; k <= j; k++)
+			AA[j][k] = data_precast[-j-1]*data_precast[-k-1];
+
+	for(int i = 0; i < (int)data_len; i++){
+		for(int j = 0; j < (int)order; j++){
+			for(int k = 0; k <= j; k++){
+				AWA[j][k] += weight[i]*AA[j][k];
+			}
+			AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
+		}
+		// Move 1 row and 1 column up
+		memmove(&AA[1][1],&AA[0][0],sizeof(double)*(FLAC__MAX_LPC_ORDER*(FLAC__MAX_LPC_ORDER-1)-1));
+		for(int k = 0; k <= (int)order; k++)
+			AA[k][0] = data_precast[i]*data_precast[i-k];
+	}
+#endif
 
 	for(uint32_t i = 0; i < order; i++){
         if(AWA[i][i] < 1){
