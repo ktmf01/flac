@@ -221,6 +221,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 {
 	double irls_moving_average_sum, irls_moving_average;
 	double weight[FLAC__MAX_BLOCK_SIZE];
+	double data_precast[FLAC__MAX_BLOCK_SIZE];
 
 	// First, set AWA and AWb to 0
 	for(uint32_t j = 0; j < order; j++){
@@ -229,6 +230,10 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 		}
 		AWb[j] = 0.0;
 	}
+
+	// Now, cast all data to double
+	for(int i = -order; i < (int)data_len; i++)
+		data_precast[i] = data[i];
 
 	// We need a moving average to set the weighting cut-offs.
 	// With this moving average, the rice parameter can be guessed
@@ -278,17 +283,17 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 	for(int i = 0; i < (int)data_len; i++){
 		for(int j = 0; j < (int)order; j++){
 			for(int k = 0; k <= j; k++){
-				AWA[j][k] += weight[i]*data[i-j-1]*data[i-k-1];
+				AWA[j][k] += weight[i]*data_precast[i-j-1]*data_precast[i-k-1];
 			}
-			AWb[j] += weight[i]*data[i-j-1]*data[i];
+			AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
 		}
 	}
 
 	for(uint32_t i = 0; i < order; i++){
-        	if(AWA[i][i] < 1){
+        if(AWA[i][i] < 1){
 			return false;
  		}
-        	if(AWb[i] != AWb[i]){
+        if(AWb[i] != AWb[i]){
 			return false;
 		}
 	}
