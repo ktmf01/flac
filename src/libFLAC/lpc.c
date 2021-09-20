@@ -279,6 +279,7 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 		}
 	}
 
+#if 0
 	// This loop runs over samples instead of over orders
 	// because of data locality
 	for(int i = 0; i < (int)data_len; i++){
@@ -289,6 +290,29 @@ FLAC__bool FLAC__lpc_weigh_data(const FLAC__int32 * flac_restrict data, FLAC__in
 			AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
 		}
 	}
+#else
+	// Add some hints for autovectorization
+	if(order == 12 && data_len > 1000){
+		for(int i = 0; i < (int)data_len; i++){
+			for(int j = 0; j < (int)order; j++){
+				for(int k = 0; k <= j; k++){
+					AWA[j][k] += weight[i]*data_precast[i-j-1]*data_precast[i-k-1];
+				}
+				AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
+			}
+		}
+	}else{
+		for(int i = 0; i < (int)data_len; i++){
+			for(int j = 0; j < (int)order; j++){
+				for(int k = 0; k <= j; k++){
+					AWA[j][k] += weight[i]*data_precast[i-j-1]*data_precast[i-k-1];
+				}
+				AWb[j] += weight[i]*data_precast[i-j-1]*data_precast[i];
+			}
+		}
+	}
+#endif
+
 
 	for(uint32_t i = 0; i < order; i++){
         if(AWA[i][i] < 1){
