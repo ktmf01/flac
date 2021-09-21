@@ -122,7 +122,7 @@ static const  struct CompressionLevels {
 	{ true , false,  8, 0, false, false, false, 0, 6, 0, "tukey(5e-1);partial_tukey(2)" },
 	{ true , false, 12, 0, false, false, false, 0, 6, 0, "tukey(5e-1);partial_tukey(2)" },
 	{ true , false, 12, 0, false, false, false, 0, 6, 0, "tukey(5e-1);partial_tukey(2);punchout_tukey(3)" },
-	{ true , false, 12, 0, false, false, true,  0, 6, 0, "tukey(5e-1);partial_tukey(2);punchout_tukey(3);irls(3 11)" }
+	{ true , false, 12, 0, false, false, true,  0, 6, 0, "tukey(5e-1);partial_tukey(2);punchout_tukey(3);irlspost-p(3)" }
 	/* here we use locale-independent 5e-1 instead of 0.5 or 0,5 */
 };
 
