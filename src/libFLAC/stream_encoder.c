@@ -1759,7 +1759,7 @@ FLAC_API FLAC__bool FLAC__stream_encoder_set_apodization(FLAC__StreamEncoder *en
 				encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_TUKEY;
 			}
 		}
-		else if(n>15   && 0 == strncmp("partial_tukey("       , specification, 14)) {
+		else if(n>15   && 0 == strncmp("partial_tukey(", specification, 14)) {
 			FLAC__int32 tukey_parts = (FLAC__int32)strtod(specification+14, 0);
 			const char *si_1 = strchr(specification, '/');
 			FLAC__real overlap = si_1?flac_min((FLAC__real)strtod(si_1+1, 0),0.99f):0.1f;
@@ -1780,7 +1780,7 @@ FLAC_API FLAC__bool FLAC__stream_encoder_set_apodization(FLAC__StreamEncoder *en
 				}
 			}
 		}
-		else if(n>16   && 0 == strncmp("punchout_tukey("       , specification, 15)) {
+		else if(n>16   && 0 == strncmp("punchout_tukey(", specification, 15)) {
 			FLAC__int32 tukey_parts = (FLAC__int32)strtod(specification+15, 0);
 			const char *si_1 = strchr(specification, '/');
 			FLAC__real overlap = si_1?flac_min((FLAC__real)strtod(si_1+1, 0),0.99f):0.2f;
@@ -1800,6 +1800,14 @@ FLAC_API FLAC__bool FLAC__stream_encoder_set_apodization(FLAC__StreamEncoder *en
 					encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_PUNCHOUT_TUKEY;
 				}
 			}
+		}
+		else if(n>10  && 0 == strncmp("subblock("    , specification, 9)){
+			FLAC__int32 parts = (FLAC__int32)strtod(specification+9, 0);
+			const char *si_1 = strchr(specification, '/');
+			FLAC__real Np = si_1?(FLAC__real)strtod(si_1+1, 0):50;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.subblock.parts = parts;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.subblock.Np = Np;
+			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_SUBBLOCK;
 		}
 		else if(n==5  && 0 == strncmp("welch"        , specification, n))
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_WELCH;
@@ -2586,7 +2594,10 @@ FLAC__bool resize_buffers_(FLAC__StreamEncoder *encoder, uint32_t new_blocksize)
 					FLAC__window_triangle(encoder->private_->window[i], new_blocksize);
 					break;
 				case FLAC__APODIZATION_TUKEY:
-					FLAC__window_tukey(encoder->private_->window[i], new_blocksize, encoder->protected_->apodizations[i].parameters.tukey.p);
+					FLAC__window_tukey(encoder->private_->window[i], new_blocksize, (FLAC__int32)(encoder->protected_->apodizations[i].parameters.tukey.p / 2.0f * new_blocksize) - 1);
+					break;
+				case FLAC__APODIZATION_SUBBLOCK:
+					FLAC__window_tukey(encoder->private_->window[i], new_blocksize, encoder->protected_->apodizations[i].parameters.subblock.Np);
 					break;
 				case FLAC__APODIZATION_PARTIAL_TUKEY:
 					FLAC__window_partial_tukey(encoder->private_->window[i], new_blocksize, encoder->protected_->apodizations[i].parameters.multiple_tukey.p, encoder->protected_->apodizations[i].parameters.multiple_tukey.start, encoder->protected_->apodizations[i].parameters.multiple_tukey.end);
@@ -3432,6 +3443,7 @@ FLAC__bool process_subframe_(
 #ifndef FLAC__INTEGER_ONLY_LIBRARY
 	double lpc_residual_bits_per_sample;
 	double autoc[FLAC__MAX_LPC_ORDER+1]; /* WATCHOUT: the size is important even though encoder->protected_->max_lpc_order might be less; some asm and x86 intrinsic routines need all the space */
+	double autoc_root[FLAC__MAX_LPC_ORDER+1]; /* This is for SUBBLOCK apodization */
 	double lpc_error[FLAC__MAX_LPC_ORDER];
 	uint32_t min_lpc_order, max_lpc_order, lpc_order;
 	uint32_t min_qlp_coeff_precision, max_qlp_coeff_precision, qlp_coeff_precision;
@@ -3536,8 +3548,8 @@ FLAC__bool process_subframe_(
 				else
 					max_lpc_order = encoder->protected_->max_lpc_order;
 				if(max_lpc_order > 0) {
-					uint32_t a;
-					for (a = 0; a < encoder->protected_->num_apodizations; a++) {
+					uint32_t a, b = 1, c = 0;
+					for (a = 0; a < encoder->protected_->num_apodizations;) {
 						#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 						if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS){
 							if(encoder->protected_->apodizations[a].parameters.irls.post){
@@ -3568,8 +3580,41 @@ FLAC__bool process_subframe_(
 						}else
 						#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 						{
-							FLAC__lpc_window_data(integer_signal, encoder->private_->window[a], encoder->private_->windowed_signal, frame_header->blocksize);
-							encoder->private_->local_lpc_compute_autocorrelation(encoder->private_->windowed_signal, frame_header->blocksize, max_lpc_order+1, autoc);
+							if(b == 1){
+								/* */
+								//fprintf(stderr, "Block nr %d\n", encoder->private_->current_frame_number);
+								FLAC__lpc_window_data(integer_signal, encoder->private_->window[a], encoder->private_->windowed_signal, frame_header->blocksize);
+								encoder->private_->local_lpc_compute_autocorrelation(encoder->private_->windowed_signal, frame_header->blocksize, max_lpc_order+1, autoc);
+								if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_SUBBLOCK){
+									for(uint32_t i = 0; i < max_lpc_order; i++)
+										autoc_root[i] = autoc[i];
+									b++;
+								}else{
+									a++;
+								}
+							}else{
+								//fprintf(stderr, "set nr %d %d\n", b, c);
+								if(!(c % 2)){
+									FLAC__lpc_window_data_partial(integer_signal, encoder->private_->window[a], encoder->private_->windowed_signal, frame_header->blocksize, frame_header->blocksize/b/2, (c/2*frame_header->blocksize)/b);
+									encoder->private_->local_lpc_compute_autocorrelation(encoder->private_->windowed_signal, frame_header->blocksize/b, max_lpc_order+1, autoc);
+									//fprintf(stderr, "part_size %d, shift %d, data_len %d\n", frame_header->blocksize/b/2, (c/2*frame_header->blocksize)/b , frame_header->blocksize/b);
+								}else if(b > 2){
+									for(uint32_t i = 0; i < max_lpc_order; i++)
+										autoc[i] = autoc_root[i] - autoc[i];
+								}
+								if(c < (b*2-1)){
+									c++;
+								}else{
+									c = 0;
+									b++;
+								}
+								if((FLAC__int32)b > encoder->protected_->apodizations[a].parameters.subblock.parts){
+									a++;
+									b = 1;
+									c = 0;
+								}
+							}
+
 							/* if autoc[0] == 0.0, the signal is constant and we usually won't get here, but it can happen */
 							if(autoc[0] == 0.0) {
 								continue;
