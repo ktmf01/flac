@@ -190,14 +190,13 @@ void FLAC__window_triangle(FLAC__real *window, const FLAC__int32 L)
 	}
 }
 
-void FLAC__window_tukey(FLAC__real *window, const FLAC__int32 L, const FLAC__real p)
+void FLAC__window_tukey(FLAC__real *window, const FLAC__int32 L, const FLAC__int32 Np)
 {
-	if (p <= 0.0)
+	if (Np <= 0)
 		FLAC__window_rectangle(window, L);
-	else if (p >= 1.0)
+	else if ((2 * Np) >= L)
 		FLAC__window_hann(window, L);
 	else {
-		const FLAC__int32 Np = (FLAC__int32)(p / 2.0f * L) - 1;
 		FLAC__int32 n;
 		/* start with rectangle... */
 		FLAC__window_rectangle(window, L);

@@ -64,6 +64,7 @@ typedef enum {
 	FLAC__APODIZATION_TUKEY,
 	FLAC__APODIZATION_PARTIAL_TUKEY,
 	FLAC__APODIZATION_PUNCHOUT_TUKEY,
+	FLAC__APODIZATION_SUBBLOCK,
 	FLAC__APODIZATION_WELCH
 } FLAC__ApodizationFunction;
 
@@ -88,6 +89,10 @@ typedef struct {
 			FLAC__bool precisionsearch;
 		} irls;
 #endif
+		struct {
+			FLAC__int32 parts;
+			FLAC__int32 Np;
+		} subblock;
 	} parameters;
 } FLAC__ApodizationSpecification;
 
