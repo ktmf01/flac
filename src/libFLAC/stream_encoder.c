@@ -119,10 +119,10 @@ static const  struct CompressionLevels {
 	{ false, false,  6, 0, false, false, false, 0, 4, 0, "tukey(5e-1)" },
 	{ true , true ,  8, 0, false, false, false, 0, 4, 0, "tukey(5e-1)" },
 	{ true , false,  8, 0, false, false, false, 0, 5, 0, "tukey(5e-1)" },
-	{ true , false,  8, 0, false, false, false, 0, 6, 0, "tukey(5e-1);partial_tukey(2)" },
-	{ true , false, 12, 0, false, false, false, 0, 6, 0, "tukey(5e-1);partial_tukey(2)" },
-	{ true , false, 12, 0, false, false, false, 0, 6, 0, "tukey(5e-1);partial_tukey(2);punchout_tukey(3)" },
-	{ true , false, 12, 0, false, false, true,  0, 6, 0, "tukey(5e-1);partial_tukey(2);punchout_tukey(3);irlspost-p(3)" }
+	{ true , false,  8, 0, false, false, false, 0, 6, 0, "subblock(2)" },
+	{ true , false, 12, 0, false, false, false, 0, 6, 0, "subblock(2)" },
+	{ true , false, 12, 0, false, false, false, 0, 6, 0, "subblock(3)" },
+	{ true , false, 12, 0, false, false, false, 0, 6, 0, "subblock(3);irlspost-p(4)" }
 	/* here we use locale-independent 5e-1 instead of 0.5 or 0,5 */
 };
 
@@ -1803,11 +1803,13 @@ FLAC_API FLAC__bool FLAC__stream_encoder_set_apodization(FLAC__StreamEncoder *en
 		}
 		else if(n>10  && 0 == strncmp("subblock("    , specification, 9)){
 			FLAC__int32 parts = (FLAC__int32)strtod(specification+9, 0);
-			const char *si_1 = strchr(specification, '/');
-			FLAC__real Np = si_1?(FLAC__real)strtod(si_1+1, 0):50;
-			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.subblock.parts = parts;
-			encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.subblock.Np = Np;
-			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_SUBBLOCK;
+			if(parts > 1){
+				const char *si_1 = strchr(specification, '/');
+				FLAC__real Np = si_1?(FLAC__real)strtod(si_1+1, 0):(600/parts);
+				encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.subblock.parts = parts;
+				encoder->protected_->apodizations[encoder->protected_->num_apodizations].parameters.subblock.Np = Np;
+				encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_SUBBLOCK;
+			}
 		}
 		else if(n==5  && 0 == strncmp("welch"        , specification, n))
 			encoder->protected_->apodizations[encoder->protected_->num_apodizations++].type = FLAC__APODIZATION_WELCH;
@@ -3421,6 +3423,31 @@ FLAC__bool process_subframes_(FLAC__StreamEncoder *encoder, FLAC__bool is_fracti
 	return true;
 }
 
+static inline void set_next_subblock(FLAC__int32 parts, uint32_t * apodizations, uint32_t * current_depth, uint32_t * current_part){
+	// current_part is interleaved: even are partial, odd are punchout
+	if(*current_depth == 2){
+		// For depth 2, we only do partial, no punchout as that is almost redundant
+		if(*current_part == 0){
+			*current_part = 2;
+		}else{ /* *current_path == 2 */
+			*current_part = 0;
+			(*current_depth)++;
+		}
+	}else if((*current_part) < (2*(*current_depth)-1)){
+		(*current_part)++;
+	}else{ /* (*current_part) >= (2*(*current_depth)-1) */
+		*current_part = 0;
+		(*current_depth)++;
+	}
+
+	/* Now check if we are done with this SUBBLOCK apodization */
+	if(*current_depth > (uint32_t) parts){
+		(*apodizations)++;
+		*current_depth = 1;
+		*current_part = 0;
+	}
+}
+
 FLAC__bool process_subframe_(
 	FLAC__StreamEncoder *encoder,
 	uint32_t min_partition_order,
@@ -3552,6 +3579,7 @@ FLAC__bool process_subframe_(
 					for (a = 0; a < encoder->protected_->num_apodizations;) {
 						#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 						if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS){
+							a++;
 							if(encoder->protected_->apodizations[a].parameters.irls.post){
 								uint32_t i;
 								if(a > 0 && encoder->protected_->apodizations[a-1].type == FLAC__APODIZATION_IRLS){
@@ -3576,13 +3604,12 @@ FLAC__bool process_subframe_(
 																		 encoder->protected_->apodizations[a].parameters.irls.post)){
 								continue;
 							}
-							min_lpc_order = 1;
+							min_lpc_order = 2; /* Force exhaustive search */
 						}else
 						#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
 						{
 							if(b == 1){
 								/* */
-								//fprintf(stderr, "Block nr %d\n", encoder->private_->current_frame_number);
 								FLAC__lpc_window_data(integer_signal, encoder->private_->window[a], encoder->private_->windowed_signal, frame_header->blocksize);
 								encoder->private_->local_lpc_compute_autocorrelation(encoder->private_->windowed_signal, frame_header->blocksize, max_lpc_order+1, autoc);
 								if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_SUBBLOCK){
@@ -3593,26 +3620,17 @@ FLAC__bool process_subframe_(
 									a++;
 								}
 							}else{
-								//fprintf(stderr, "set nr %d %d\n", b, c);
 								if(!(c % 2)){
+									/* on even c, evaluate the (c/2)th partial window of size blocksize/b  */
 									FLAC__lpc_window_data_partial(integer_signal, encoder->private_->window[a], encoder->private_->windowed_signal, frame_header->blocksize, frame_header->blocksize/b/2, (c/2*frame_header->blocksize)/b);
 									encoder->private_->local_lpc_compute_autocorrelation(encoder->private_->windowed_signal, frame_header->blocksize/b, max_lpc_order+1, autoc);
-									//fprintf(stderr, "part_size %d, shift %d, data_len %d\n", frame_header->blocksize/b/2, (c/2*frame_header->blocksize)/b , frame_header->blocksize/b);
-								}else if(b > 2){
+								}else{
+									/* on uneven c, evaluate the root window (over the whole block) minus the previous partial window
+									 * similar to tukey_punchout apodization but more efficient	*/
 									for(uint32_t i = 0; i < max_lpc_order; i++)
 										autoc[i] = autoc_root[i] - autoc[i];
 								}
-								if(c < (b*2-1)){
-									c++;
-								}else{
-									c = 0;
-									b++;
-								}
-								if((FLAC__int32)b > encoder->protected_->apodizations[a].parameters.subblock.parts){
-									a++;
-									b = 1;
-									c = 0;
-								}
+								set_next_subblock(encoder->protected_->apodizations[a].parameters.subblock.parts, &a, &b, &c);
 							}
 
 							/* if autoc[0] == 0.0, the signal is constant and we usually won't get here, but it can happen */
