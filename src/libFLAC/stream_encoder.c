@@ -3712,7 +3712,6 @@ FLAC__bool process_subframe_(
 					for (a = 0; a < encoder->protected_->num_apodizations;) {
 						#ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES
 						if(encoder->protected_->apodizations[a].type == FLAC__APODIZATION_IRLS){
-							a++;
 							if(encoder->protected_->apodizations[a].parameters.irls.post){
 								uint32_t i;
 								if(a > 0 && encoder->protected_->apodizations[a-1].type == FLAC__APODIZATION_IRLS){
@@ -3735,8 +3734,10 @@ FLAC__bool process_subframe_(
 																		 encoder->protected_->apodizations[a].parameters.irls.iterations,
 																		 encoder->private_->local_lpc_compute_residual_from_qlp_coefficients_64bit,
 																		 encoder->protected_->apodizations[a].parameters.irls.post)){
+								a++;
 								continue;
 							}
+							a++;
 							min_lpc_order = 2; /* Force exhaustive search */
 						}else
 						#endif /* end of ifdef ENABLE_ITERATIVELY_REWEIGHTED_LEAST_SQUARES */
