@@ -729,6 +729,7 @@ FLAC__bool FLAC__bitreader_read_rice_signed(FLAC__BitReader *br, int *val, uint3
 	FLAC__ASSERT(0 != br);
 	FLAC__ASSERT(0 != br->buffer);
 	FLAC__ASSERT(parameter <= 31);
+	__builtin_trap();
 
 	/* read the unary MSBs and end bit */
 	if(!FLAC__bitreader_read_unary_unsigned(br, &msbs))
@@ -749,7 +750,7 @@ FLAC__bool FLAC__bitreader_read_rice_signed(FLAC__BitReader *br, int *val, uint3
 }
 
 /* this is by far the most heavily used reader call.  it ain't pretty but it's fast */
-FLAC__bool FLAC__bitreader_read_rice_signed_block(FLAC__BitReader *br, int vals[], uint32_t nvals, uint32_t parameter)
+FLAC__bool FLAC__bitreader_read_rice_signed_block(FLAC__BitReader *br, FLAC__int64 vals[], uint32_t nvals, uint32_t parameter)
 {
 	/* try and get br->consumed_words and br->consumed_bits into register;
 	 * must remember to flush them back to *br before calling other
@@ -757,7 +758,7 @@ FLAC__bool FLAC__bitreader_read_rice_signed_block(FLAC__BitReader *br, int vals[
 	uint32_t cwords, words, lsbs, msbs, x, y;
 	uint32_t ucbits; /* keep track of the number of unconsumed bits in word */
 	brword b;
-	int *val, *end;
+	FLAC__int64 *val, *end;
 
 	FLAC__ASSERT(0 != br);
 	FLAC__ASSERT(0 != br->buffer);
@@ -775,7 +776,7 @@ FLAC__bool FLAC__bitreader_read_rice_signed_block(FLAC__BitReader *br, int vals[
 			if(!FLAC__bitreader_read_unary_unsigned(br, &msbs))
 				return false;
 
-			*val++ = (int)(msbs >> 1) ^ -(int)(msbs & 1);
+			*val++ = (int64_t)(msbs >> 1) ^ -(int64_t)(msbs & 1);
 		}
 
 		return true;
@@ -833,8 +834,11 @@ FLAC__bool FLAC__bitreader_read_rice_signed_block(FLAC__BitReader *br, int vals[
 		lsbs = x;
 
 		/* compose the value */
-		x = (msbs << parameter) | lsbs;
-		*val++ = (int)(x >> 1) ^ -(int)(x & 1);
+		{
+			FLAC__int64 m;
+			m = ((FLAC__int64)msbs << parameter) | lsbs;
+			*val++ = (m >> 1) ^ -(m & 1);
+		}
 
 		continue;
 
@@ -865,8 +869,11 @@ incomplete_lsbs:
 			lsbs = x | lsbs;
 
 			/* compose the value */
-			x = (msbs << parameter) | lsbs;
-			*val++ = (int)(x >> 1) ^ -(int)(x & 1);
+			{
+				FLAC__int64 m;
+				m = ((FLAC__int64)msbs << parameter) | lsbs;
+				*val++ = (m >> 1) ^ -(m & 1);
+			}
 			x = 0;
 
 			cwords = br->consumed_words;

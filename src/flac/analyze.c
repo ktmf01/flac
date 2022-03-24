@@ -95,7 +95,7 @@ void flac__analyze_frame(const FLAC__Frame *frame, uint32_t frame_number, FLAC__
 				}
 				if(aopts.do_residual_text) {
 					for(i = 0; i < frame->header.blocksize-subframe->data.fixed.order; i++)
-						fprintf(fout, "\t\tresidual[%u]=%d\n", i, subframe->data.fixed.residual[i]);
+						fprintf(fout, "\t\tresidual[%u]=%" PRId64 "\n", i, subframe->data.fixed.residual[i]);
 				}
 				break;
 			case FLAC__SUBFRAME_TYPE_LPC:
@@ -115,7 +115,7 @@ void flac__analyze_frame(const FLAC__Frame *frame, uint32_t frame_number, FLAC__
 				}
 				if(aopts.do_residual_text) {
 					for(i = 0; i < frame->header.blocksize-subframe->data.lpc.order; i++)
-						fprintf(fout, "\t\tresidual[%u]=%d\n", i, subframe->data.lpc.residual[i]);
+						fprintf(fout, "\t\tresidual[%u]=%" PRId64 "\n", i, subframe->data.lpc.residual[i]);
 				}
 				break;
 			case FLAC__SUBFRAME_TYPE_VERBATIM:

@@ -87,7 +87,7 @@ uint32_t FLAC__fixed_compute_best_predictor_wide(const FLAC__int32 data[], uint3
  *	IN order <= FLAC__MAX_FIXED_ORDER fixed-predictor order
  *	OUT residual[0,data_len-1]        residual signal
  */
-void FLAC__fixed_compute_residual(const FLAC__int32 data[], uint32_t data_len, uint32_t order, FLAC__int32 residual[]);
+void FLAC__fixed_compute_residual(const FLAC__int32 data[], uint32_t data_len, uint32_t order, FLAC__int64 residual[]);
 
 /*
  *	FLAC__fixed_restore_signal()
@@ -102,6 +102,6 @@ void FLAC__fixed_compute_residual(const FLAC__int32 data[], uint32_t data_len, u
  *	IN  data[-order,-1]               previously-reconstructed historical samples
  *	OUT data[0,data_len-1]            original signal
  */
-void FLAC__fixed_restore_signal(const FLAC__int32 residual[], uint32_t data_len, uint32_t order, FLAC__int32 data[]);
+void FLAC__fixed_restore_signal(const FLAC__int64 residual[], uint32_t data_len, uint32_t order, FLAC__int32 data[]);
 
 #endif

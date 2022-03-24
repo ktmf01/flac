@@ -515,6 +515,7 @@ FLAC__bool FLAC__bitwriter_write_rice_signed(FLAC__BitWriter *bw, FLAC__int32 va
 {
 	uint32_t total_bits, interesting_bits, msbs;
 	FLAC__uint32 uval, pattern;
+	__builtin_trap();
 
 	FLAC__ASSERT(0 != bw);
 	FLAC__ASSERT(0 != bw->buffer);
@@ -539,26 +540,26 @@ FLAC__bool FLAC__bitwriter_write_rice_signed(FLAC__BitWriter *bw, FLAC__int32 va
 			FLAC__bitwriter_write_raw_uint32(bw, pattern, interesting_bits); /* write the unary end bit and binary LSBs */
 }
 
-FLAC__bool FLAC__bitwriter_write_rice_signed_block(FLAC__BitWriter *bw, const FLAC__int32 *vals, uint32_t nvals, uint32_t parameter)
+FLAC__bool FLAC__bitwriter_write_rice_signed_block(FLAC__BitWriter *bw, const FLAC__int64 *vals, uint32_t nvals, uint32_t parameter)
 {
-	const FLAC__uint32 mask1 = (FLAC__uint32)0xffffffff << parameter; /* we val|=mask1 to set the stop bit above it... */
-	const FLAC__uint32 mask2 = (FLAC__uint32)0xffffffff >> (31-parameter); /* ...then mask off the bits above the stop bit with val&=mask2 */
-	FLAC__uint32 uval;
-	uint32_t left;
-	const uint32_t lsbits = 1 + parameter;
-	uint32_t msbits, total_bits;
+	const FLAC__uint64 mask1 = (FLAC__uint64)0xffffffffffffffff << parameter; /* we val|=mask1 to set the stop bit above it... */
+	const FLAC__uint64 mask2 = (FLAC__uint64)0xffffffffffffffff >> (63-parameter); /* ...then mask off the bits above the stop bit with val&=mask2 */
+	FLAC__uint64 uval;
+	FLAC__uint64 left;
+	const FLAC__uint64 lsbits = 1 + parameter;
+	FLAC__uint64 msbits, total_bits;
 
 	FLAC__ASSERT(0 != bw);
 	FLAC__ASSERT(0 != bw->buffer);
 	FLAC__ASSERT(parameter < 31);
 	/* WATCHOUT: code does not work with <32bit words; we can make things much faster with this assertion */
-	FLAC__ASSERT(FLAC__BITS_PER_WORD >= 32);
+	FLAC__ASSERT(FLAC__BITS_PER_WORD >= 64);
 
 	while(nvals) {
 		/* fold signed to uint32_t; actual formula is: negative(v)? -2v-1 : 2v */
 		uval = *vals;
 		uval <<= 1;
-		uval ^= (*vals>>31);
+		uval ^= (*vals>>63);
 
 		msbits = uval >> parameter;
 		total_bits = lsbits + msbits;

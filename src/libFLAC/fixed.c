@@ -333,15 +333,15 @@ uint32_t FLAC__fixed_compute_best_predictor_wide(const FLAC__int32 data[], uint3
 	return order;
 }
 
-void FLAC__fixed_compute_residual(const FLAC__int32 data[], uint32_t data_len, uint32_t order, FLAC__int32 residual[])
+void FLAC__fixed_compute_residual(const FLAC__int32 data[], uint32_t data_len, uint32_t order, FLAC__int64 residual[])
 {
 	const int idata_len = (int)data_len;
 	int i;
 
 	switch(order) {
 		case 0:
-			FLAC__ASSERT(sizeof(residual[0]) == sizeof(data[0]));
-			memcpy(residual, data, sizeof(residual[0])*data_len);
+			for(i = 0; i < idata_len; i++)
+				residual[i] = data[i];
 			break;
 		case 1:
 			for(i = 0; i < idata_len; i++)
@@ -364,14 +364,14 @@ void FLAC__fixed_compute_residual(const FLAC__int32 data[], uint32_t data_len, u
 	}
 }
 
-void FLAC__fixed_restore_signal(const FLAC__int32 residual[], uint32_t data_len, uint32_t order, FLAC__int32 data[])
+void FLAC__fixed_restore_signal(const FLAC__int64 residual[], uint32_t data_len, uint32_t order, FLAC__int32 data[])
 {
 	int i, idata_len = (int)data_len;
 
 	switch(order) {
 		case 0:
-			FLAC__ASSERT(sizeof(residual[0]) == sizeof(data[0]));
-			memcpy(data, residual, sizeof(residual[0])*data_len);
+			for(i = 0; i < idata_len; i++)
+				data[i] = residual[i];
 			break;
 		case 1:
 			for(i = 0; i < idata_len; i++)

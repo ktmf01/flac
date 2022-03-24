@@ -305,7 +305,7 @@ typedef struct {
 	FLAC__int32 warmup[FLAC__MAX_FIXED_ORDER];
 	/**< Warmup samples to prime the predictor, length == order. */
 
-	const FLAC__int32 *residual;
+	const FLAC__int64 *residual;
 	/**< The residual signal, length == (blocksize minus order) samples. */
 } FLAC__Subframe_Fixed;
 
@@ -331,7 +331,7 @@ typedef struct {
 	FLAC__int32 warmup[FLAC__MAX_LPC_ORDER];
 	/**< Warmup samples to prime the predictor, length == order. */
 
-	const FLAC__int32 *residual;
+	const FLAC__int64 *residual;
 	/**< The residual signal, length == (blocksize minus order) samples. */
 } FLAC__Subframe_LPC;
 

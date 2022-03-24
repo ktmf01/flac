@@ -154,7 +154,7 @@ static FLAC__bool process_subframe_(
 	const FLAC__int32 integer_signal[],
 	FLAC__Subframe *subframe[2],
 	FLAC__EntropyCodingMethod_PartitionedRiceContents *partitioned_rice_contents[2],
-	FLAC__int32 *residual[2],
+	FLAC__int64 *residual[2],
 	uint32_t *best_subframe,
 	uint32_t *best_bits
 );
@@ -178,7 +178,7 @@ static uint32_t evaluate_constant_subframe_(
 static uint32_t evaluate_fixed_subframe_(
 	FLAC__StreamEncoder *encoder,
 	const FLAC__int32 signal[],
-	FLAC__int32 residual[],
+	FLAC__int64 residual[],
 	FLAC__uint64 abs_residual_partition_sums[],
 	uint32_t raw_bits_per_partition[],
 	uint32_t blocksize,
@@ -197,7 +197,7 @@ static uint32_t evaluate_fixed_subframe_(
 static uint32_t evaluate_lpc_subframe_(
 	FLAC__StreamEncoder *encoder,
 	const FLAC__int32 signal[],
-	FLAC__int32 residual[],
+	FLAC__int64 residual[],
 	FLAC__uint64 abs_residual_partition_sums[],
 	uint32_t raw_bits_per_partition[],
 	const FLAC__real lp_coeff[],
@@ -225,7 +225,7 @@ static uint32_t evaluate_verbatim_subframe_(
 
 static uint32_t find_best_partition_order_(
 	struct FLAC__StreamEncoderPrivate *private_,
-	const FLAC__int32 residual[],
+	const FLAC__int64 residual[],
 	FLAC__uint64 abs_residual_partition_sums[],
 	uint32_t raw_bits_per_partition[],
 	uint32_t residual_samples,
@@ -240,7 +240,7 @@ static uint32_t find_best_partition_order_(
 );
 
 static void precompute_partition_info_sums_(
-	const FLAC__int32 residual[],
+	const FLAC__int64 residual[],
 	FLAC__uint64 abs_residual_partition_sums[],
 	uint32_t residual_samples,
 	uint32_t predictor_order,
@@ -250,7 +250,7 @@ static void precompute_partition_info_sums_(
 );
 
 static void precompute_partition_info_escapes_(
-	const FLAC__int32 residual[],
+	const FLAC__int64 residual[],
 	uint32_t raw_bits_per_partition[],
 	uint32_t residual_samples,
 	uint32_t predictor_order,
@@ -260,7 +260,7 @@ static void precompute_partition_info_escapes_(
 
 static FLAC__bool set_partitioned_rice_(
 #ifdef EXACT_RICE_BITS_CALCULATION
-	const FLAC__int32 residual[],
+	const FLAC__int64 residual[],
 #endif
 	const FLAC__uint64 abs_residual_partition_sums[],
 	const uint32_t raw_bits_per_partition[],
@@ -323,8 +323,8 @@ typedef struct FLAC__StreamEncoderPrivate {
 #endif
 	uint32_t subframe_bps[FLAC__MAX_CHANNELS];        /* the effective bits per sample of the input signal (stream bps - wasted bits) */
 	uint32_t subframe_bps_mid_side[2];                /* the effective bits per sample of the mid-side input signal (stream bps - wasted bits + 0/1) */
-	FLAC__int32 *residual_workspace[FLAC__MAX_CHANNELS][2]; /* each channel has a candidate and best workspace where the subframe residual signals will be stored */
-	FLAC__int32 *residual_workspace_mid_side[2][2];
+	FLAC__int64 *residual_workspace[FLAC__MAX_CHANNELS][2]; /* each channel has a candidate and best workspace where the subframe residual signals will be stored */
+	FLAC__int64 *residual_workspace_mid_side[2][2];
 	FLAC__Subframe subframe_workspace[FLAC__MAX_CHANNELS][2];
 	FLAC__Subframe subframe_workspace_mid_side[2][2];
 	FLAC__Subframe *subframe_workspace_ptr[FLAC__MAX_CHANNELS][2];
@@ -349,7 +349,7 @@ typedef struct FLAC__StreamEncoderPrivate {
 	uint32_t current_frame_number;
 	FLAC__MD5Context md5context;
 	FLAC__CPUInfo cpuinfo;
-	void (*local_precompute_partition_info_sums)(const FLAC__int32 residual[], FLAC__uint64 abs_residual_partition_sums[], uint32_t residual_samples, uint32_t predictor_order, uint32_t min_partition_order, uint32_t max_partition_order, uint32_t bps);
+	void (*local_precompute_partition_info_sums)(const FLAC__int64 residual[], FLAC__uint64 abs_residual_partition_sums[], uint32_t residual_samples, uint32_t predictor_order, uint32_t min_partition_order, uint32_t max_partition_order, uint32_t bps);
 #ifndef FLAC__INTEGER_ONLY_LIBRARY
 	uint32_t (*local_fixed_compute_best_predictor)(const FLAC__int32 data[], uint32_t data_len, float residual_bits_per_sample[FLAC__MAX_FIXED_ORDER+1]);
 	uint32_t (*local_fixed_compute_best_predictor_wide)(const FLAC__int32 data[], uint32_t data_len, float residual_bits_per_sample[FLAC__MAX_FIXED_ORDER+1]);
@@ -359,9 +359,9 @@ typedef struct FLAC__StreamEncoderPrivate {
 #endif
 #ifndef FLAC__INTEGER_ONLY_LIBRARY
 	void (*local_lpc_compute_autocorrelation)(const FLAC__real data[], uint32_t data_len, uint32_t lag, double autoc[]);
-	void (*local_lpc_compute_residual_from_qlp_coefficients)(const FLAC__int32 *data, uint32_t data_len, const FLAC__int32 qlp_coeff[], uint32_t order, int lp_quantization, FLAC__int32 residual[]);
-	void (*local_lpc_compute_residual_from_qlp_coefficients_64bit)(const FLAC__int32 *data, uint32_t data_len, const FLAC__int32 qlp_coeff[], uint32_t order, int lp_quantization, FLAC__int32 residual[]);
-	void (*local_lpc_compute_residual_from_qlp_coefficients_16bit)(const FLAC__int32 *data, uint32_t data_len, const FLAC__int32 qlp_coeff[], uint32_t order, int lp_quantization, FLAC__int32 residual[]);
+	void (*local_lpc_compute_residual_from_qlp_coefficients)(const FLAC__int32 *data, uint32_t data_len, const FLAC__int32 qlp_coeff[], uint32_t order, int lp_quantization, FLAC__int64 residual[]);
+	void (*local_lpc_compute_residual_from_qlp_coefficients_64bit)(const FLAC__int32 *data, uint32_t data_len, const FLAC__int32 qlp_coeff[], uint32_t order, int lp_quantization, FLAC__int64 residual[]);
+	void (*local_lpc_compute_residual_from_qlp_coefficients_16bit)(const FLAC__int32 *data, uint32_t data_len, const FLAC__int32 qlp_coeff[], uint32_t order, int lp_quantization, FLAC__int64 residual[]);
 #endif
 	FLAC__bool disable_constant_subframes;
 	FLAC__bool disable_fixed_subframes;
@@ -389,8 +389,8 @@ typedef struct FLAC__StreamEncoderPrivate {
 	FLAC__real *window_unaligned[FLAC__MAX_APODIZATION_FUNCTIONS];
 	FLAC__real *windowed_signal_unaligned;
 #endif
-	FLAC__int32 *residual_workspace_unaligned[FLAC__MAX_CHANNELS][2];
-	FLAC__int32 *residual_workspace_mid_side_unaligned[2][2];
+	FLAC__int64 *residual_workspace_unaligned[FLAC__MAX_CHANNELS][2];
+	FLAC__int64 *residual_workspace_mid_side_unaligned[2][2];
 	FLAC__uint64 *abs_residual_partition_sums_unaligned;
 	uint32_t *raw_bits_per_partition_unaligned;
 	/*
@@ -2522,12 +2522,12 @@ FLAC__bool resize_buffers_(FLAC__StreamEncoder *encoder, uint32_t new_blocksize)
 #endif
 	for(channel = 0; ok && channel < encoder->protected_->channels; channel++) {
 		for(i = 0; ok && i < 2; i++) {
-			ok = ok && FLAC__memory_alloc_aligned_int32_array(new_blocksize, &encoder->private_->residual_workspace_unaligned[channel][i], &encoder->private_->residual_workspace[channel][i]);
+			ok = ok && FLAC__memory_alloc_aligned_int64_array(new_blocksize+16, &encoder->private_->residual_workspace_unaligned[channel][i], &encoder->private_->residual_workspace[channel][i]);
 		}
 	}
 	for(channel = 0; ok && channel < 2; channel++) {
 		for(i = 0; ok && i < 2; i++) {
-			ok = ok && FLAC__memory_alloc_aligned_int32_array(new_blocksize, &encoder->private_->residual_workspace_mid_side_unaligned[channel][i], &encoder->private_->residual_workspace_mid_side[channel][i]);
+			ok = ok && FLAC__memory_alloc_aligned_int64_array(new_blocksize+16, &encoder->private_->residual_workspace_mid_side_unaligned[channel][i], &encoder->private_->residual_workspace_mid_side[channel][i]);
 		}
 	}
 	/* the *2 is an approximation to the series 1 + 1/2 + 1/4 + ... that sums tree occupies in a flat array */
@@ -3419,7 +3419,7 @@ FLAC__bool process_subframe_(
 	const FLAC__int32 integer_signal[],
 	FLAC__Subframe *subframe[2],
 	FLAC__EntropyCodingMethod_PartitionedRiceContents *partitioned_rice_contents[2],
-	FLAC__int32 *residual[2],
+	FLAC__int64 *residual[2],
 	uint32_t *best_subframe,
 	uint32_t *best_bits
 )
@@ -3773,7 +3773,7 @@ uint32_t evaluate_constant_subframe_(
 uint32_t evaluate_fixed_subframe_(
 	FLAC__StreamEncoder *encoder,
 	const FLAC__int32 signal[],
-	FLAC__int32 residual[],
+	FLAC__int64 residual[],
 	FLAC__uint64 abs_residual_partition_sums[],
 	uint32_t raw_bits_per_partition[],
 	uint32_t blocksize,
@@ -3833,7 +3833,7 @@ uint32_t evaluate_fixed_subframe_(
 uint32_t evaluate_lpc_subframe_(
 	FLAC__StreamEncoder *encoder,
 	const FLAC__int32 signal[],
-	FLAC__int32 residual[],
+	FLAC__int64 residual[],
 	FLAC__uint64 abs_residual_partition_sums[],
 	uint32_t raw_bits_per_partition[],
 	const FLAC__real lp_coeff[],
@@ -3941,7 +3941,7 @@ uint32_t evaluate_verbatim_subframe_(
 
 uint32_t find_best_partition_order_(
 	FLAC__StreamEncoderPrivate *private_,
-	const FLAC__int32 residual[],
+	const FLAC__int64 residual[],
 	FLAC__uint64 abs_residual_partition_sums[],
 	uint32_t raw_bits_per_partition[],
 	uint32_t residual_samples,
@@ -4035,7 +4035,7 @@ uint32_t find_best_partition_order_(
 }
 
 void precompute_partition_info_sums_(
-	const FLAC__int32 residual[],
+	const FLAC__int64 residual[],
 	FLAC__uint64 abs_residual_partition_sums[],
 	uint32_t residual_samples,
 	uint32_t predictor_order,
@@ -4059,7 +4059,7 @@ void precompute_partition_info_sums_(
 				FLAC__uint32 abs_residual_partition_sum = 0;
 				end += default_partition_samples;
 				for( ; residual_sample < end; residual_sample++)
-					abs_residual_partition_sum += abs(residual[residual_sample]); /* abs(INT_MIN) is undefined, but if the residual is INT_MIN we have bigger problems */
+					abs_residual_partition_sum += llabs(residual[residual_sample]); /* abs(INT_MIN) is undefined, but if the residual is INT_MIN we have bigger problems */
 				abs_residual_partition_sums[partition] = abs_residual_partition_sum;
 			}
 		}
@@ -4068,7 +4068,7 @@ void precompute_partition_info_sums_(
 				FLAC__uint64 abs_residual_partition_sum64 = 0;
 				end += default_partition_samples;
 				for( ; residual_sample < end; residual_sample++)
-					abs_residual_partition_sum64 += abs(residual[residual_sample]); /* abs(INT_MIN) is undefined, but if the residual is INT_MIN we have bigger problems */
+					abs_residual_partition_sum64 += llabs(residual[residual_sample]); /* abs(INT_MIN) is undefined, but if the residual is INT_MIN we have bigger problems */
 				abs_residual_partition_sums[partition] = abs_residual_partition_sum64;
 			}
 		}
@@ -4092,7 +4092,7 @@ void precompute_partition_info_sums_(
 }
 
 void precompute_partition_info_escapes_(
-	const FLAC__int32 residual[],
+	const FLAC__int64 residual[],
 	uint32_t raw_bits_per_partition[],
 	uint32_t residual_samples,
 	uint32_t predictor_order,
@@ -4153,7 +4153,7 @@ void precompute_partition_info_escapes_(
 static inline uint32_t count_rice_bits_in_partition_(
 	const uint32_t rice_parameter,
 	const uint32_t partition_samples,
-	const FLAC__int32 *residual
+	const FLAC__int64 *residual
 )
 {
 	uint32_t i;
@@ -4162,7 +4162,7 @@ static inline uint32_t count_rice_bits_in_partition_(
 		(1+rice_parameter) * partition_samples /* 1 for unary stop bit + rice_parameter for the binary portion */
 	;
 	for(i = 0; i < partition_samples; i++)
-		partition_bits += ( (FLAC__uint32)((residual[i]<<1)^(residual[i]>>31)) >> rice_parameter );
+		partition_bits += ( (FLAC__uint64)((residual[i]<<1)^(residual[i]>>63)) >> rice_parameter );
 	return (uint32_t)(flac_min(partition_bits,(uint32_t)(-1))); // To make sure the return value doesn't overflow
 }
 #else
@@ -4193,7 +4193,7 @@ static inline uint32_t count_rice_bits_in_partition_(
 
 FLAC__bool set_partitioned_rice_(
 #ifdef EXACT_RICE_BITS_CALCULATION
-	const FLAC__int32 residual[],
+	const FLAC__int64 residual[],
 #endif
 	const FLAC__uint64 abs_residual_partition_sums[],
 	const uint32_t raw_bits_per_partition[],
