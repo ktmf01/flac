@@ -339,6 +339,9 @@ void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t ord
 			for(j = 0; j < (int)order; j++)
 				current_rounding[j] = qlp_coeff[j];
 
+			/* increase one coefficient by 1, and lower another
+			 * coefficient by 1. This keeps the sum of the coefficient
+			 * the same */
 			j = i / (order-1);
 			current_rounding[j] = flac_min(qmax,current_rounding[j]+1);
 			j = i % (order-1);
@@ -347,10 +350,14 @@ void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t ord
 			current_rounding[j] = flac_max(qmin,current_rounding[j]-1);
 
 			rounding_error = 0.0;
+			/* Yule-Walker equations in the form Ax = b, or Ax - b = 0.
+			 * Each integer solution y is scored by calculating the
+			 * length of the vector Ay - b. This should be close to
+			 * zero. */
 			for(j = 0; j < (int)order; j++) {
 				sum = 0;
 				for(k = 0; k < (int)order; k++) {
-					/* abs(j-k) is how much off-diagonal */
+					/* abs(j-k) is how much off-diagonal an entry is */
 					sum += autoc[abs(j-k)] * (double)current_rounding[k] * shift_factor;
 				}
 				sum -= autoc[j+1];
