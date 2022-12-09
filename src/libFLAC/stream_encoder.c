@@ -209,7 +209,8 @@ static uint32_t evaluate_lpc_subframe_(
 	FLAC__bool do_escape_coding,
 	uint32_t rice_parameter_search_dist,
 	FLAC__Subframe *subframe,
-	FLAC__EntropyCodingMethod_PartitionedRiceContents *partitioned_rice_contents
+	FLAC__EntropyCodingMethod_PartitionedRiceContents *partitioned_rice_contents,
+	const double autoc[]
 );
 #endif
 
@@ -3804,7 +3805,8 @@ FLAC__bool process_subframe_(
 											encoder->protected_->do_escape_coding,
 											encoder->protected_->rice_parameter_search_dist,
 											subframe[!_best_subframe],
-											partitioned_rice_contents[!_best_subframe]
+											partitioned_rice_contents[!_best_subframe],
+											autoc
 										);
 									if(_candidate_bits > 0) { /* if == 0, there was a problem quantizing the lpcoeffs */
 										if(_candidate_bits < _best_bits) {
@@ -4018,7 +4020,8 @@ uint32_t evaluate_lpc_subframe_(
 	FLAC__bool do_escape_coding,
 	uint32_t rice_parameter_search_dist,
 	FLAC__Subframe *subframe,
-	FLAC__EntropyCodingMethod_PartitionedRiceContents *partitioned_rice_contents
+	FLAC__EntropyCodingMethod_PartitionedRiceContents *partitioned_rice_contents,
+	const double autoc[]
 )
 {
 	FLAC__int32 qlp_coeff[FLAC__MAX_LPC_ORDER]; /* WATCHOUT: the size is important; some x86 intrinsic routines need more than lpc order elements */
@@ -4036,6 +4039,7 @@ uint32_t evaluate_lpc_subframe_(
 	ret = FLAC__lpc_quantize_coefficients(lp_coeff, order, qlp_coeff_precision, qlp_coeff, &quantization);
 	if(ret != 0)
 		return 0; /* this is a hack to indicate to the caller that we can't do lp at this order on this subframe */
+	FLAC__lpc_improve_quantized_coefficients(autoc, order, qlp_coeff_precision, lp_coeff, qlp_coeff, quantization);
 
 	if(FLAC__lpc_max_residual_bps(subframe_bps, qlp_coeff, order, quantization) > 32) {
 		if(subframe_bps <= 32){

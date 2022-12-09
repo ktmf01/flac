@@ -47,6 +47,7 @@
 #if !defined(NDEBUG) || defined FLAC__OVERFLOW_DETECT || defined FLAC__OVERFLOW_DETECT_VERBOSE
 #include <stdio.h>
 #endif
+#include <stdio.h>
 
 /* OPT: #undef'ing this may improve the speed on some architectures */
 #define FLAC__LPC_UNROLLED_FILTER_LOOPS
@@ -312,6 +313,67 @@ int FLAC__lpc_quantize_coefficients(const FLAC__real lp_coeff[], uint32_t order,
 
 	return 0;
 }
+
+void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t order, uint32_t precision, const FLAC__real lp_coeff[], FLAC__int32 qlp_coeff[], int shift)
+{
+	/* Try to improve quantization by minimizing quantization error */
+	FLAC__int32 best_rounding[FLAC__MAX_LPC_ORDER] = {0};
+	FLAC__int32 current_rounding[FLAC__MAX_LPC_ORDER] = {0};
+	int rounding_range = 3, tmp;
+	int i, j, k;
+	FLAC__bool improved;
+	double rounding_error, sum, shift_factor, best_rounding_error = 1e30;
+	FLAC__int32 qmax, qmin;
+
+	/* drop one bit for the sign; from here on out we consider only |lp_coeff[i]| */
+	precision--;
+	qmax = 1 << precision;
+	qmin = -qmax;
+	qmax--;
+
+	shift_factor = 1.0 / (double)(1u << shift);
+
+	do {
+		improved = false;
+		for(i = 0; i < (int)(order*(order-1)); i++) {
+			for(j = 0; j < (int)order; j++)
+				current_rounding[j] = qlp_coeff[j];
+
+			j = i / (order-1);
+			current_rounding[j] = flac_min(qmax,current_rounding[j]+1);
+			j = i % (order-1);
+			if(j >= i)
+				j++;
+			current_rounding[j] = flac_max(qmin,current_rounding[j]-1);
+
+			rounding_error = 0.0;
+			for(j = 0; j < (int)order; j++) {
+				sum = 0;
+				for(k = 0; k < (int)order; k++) {
+					/* abs(j-k) is how much off-diagonal */
+					sum += autoc[abs(j-k)] * (double)current_rounding[k] * shift_factor;
+				}
+				sum -= autoc[j+1];
+				rounding_error += sum * sum;
+			}
+
+			if(rounding_error < best_rounding_error) {
+				for(j = 0; j < (int)order; j++)
+					best_rounding[j] = current_rounding[j];
+				best_rounding_error = rounding_error;
+				if(i > 0)
+					improved = true;
+//					fprintf(stderr,"Better rounding found. i = %d, rounding_error = %f\n",i,rounding_error);
+			}
+		}
+		for(j = 0; j < (int)order; j++)
+			qlp_coeff[j] = best_rounding[j];
+//		fprintf(stderr,"Trying again ----\n");
+	} while(improved);
+//	fprintf(stderr,"Done ------------------\n");
+
+}
+
 
 #if defined(_MSC_VER)
 // silence MSVC warnings about __restrict modifier
