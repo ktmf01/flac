@@ -323,7 +323,7 @@ void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t ord
 	int i, j, k;
 	FLAC__bool improved;
 	double rounding_error, sum, shift_factor, best_rounding_error = 1e30;
-	FLAC__int32 qmax, qmin, sumcoeff, bestsumcoeff;
+	FLAC__int32 qmax, qmin;
 
 	/* drop one bit for the sign; from here on out we consider only |lp_coeff[i]| */
 	precision--;
@@ -334,13 +334,11 @@ void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t ord
 	shift_factor = 1.0 / (double)(1u << shift);
 
 	rounding_error = 0.0;
-	bestsumcoeff = 0;
 	/* Yule-Walker equations in the form Ax = b, or Ax - b = 0.
 	 * Each integer solution y is scored by calculating the
 	 * length of the vector Ay - b. This should be close to
 	 * zero. */
 	for(j = 0; j < (int)order; j++) {
-		bestsumcoeff += abs(qlp_coeff[j])*abs(qlp_coeff[j]);
 		sum = 0;
 		for(k = 0; k < (int)order; k++) {
 			/* abs(j-k) is how much off-diagonal an entry is */
@@ -373,13 +371,6 @@ void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t ord
 				tmp /= 3;
 			}
 
-			/* First check 'stability': sum of absolute coefficients must be equal or lower */
-			sumcoeff = 0;
-			for(j = 0; j < (int)order; j++)
-				sumcoeff += abs(current_rounding[j])*abs(current_rounding[j]);
-			if(sumcoeff > bestsumcoeff)
-				continue;
-
 			rounding_error = 0.0;
 			/* Yule-Walker equations in the form Ax = b, or Ax - b = 0.
 			 * Each integer solution y is scored by calculating the
@@ -406,10 +397,8 @@ void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t ord
 			}
 		}
 		fprintf(stderr,"\nImprovement has rounding_error = %f\n",best_rounding_error);
-		bestsumcoeff = 0;
 		for(j = 0; j < (int)order; j++) {
 			qlp_coeff[j] = best_rounding[j];
-			bestsumcoeff += abs(qlp_coeff[j])*abs(qlp_coeff[j]);
 			fprintf(stderr,"%d\n",best_rounding[j]);
 		}
 	} while(improved);
