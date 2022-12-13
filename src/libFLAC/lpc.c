@@ -333,6 +333,12 @@ void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t ord
 
 	shift_factor = 1.0 / (double)(1u << shift);
 
+	/* Check whether matrix is ill-conditioned. Magic tuneable parameter */
+	if(autoc[0]/autoc[order] < (2))
+		return;
+
+	fprintf(stderr,"Matrix conditioning check, order %d, ratio %f\n",order,autoc[0]/autoc[order]);
+
 	rounding_error = 0.0;
 	/* Yule-Walker equations in the form Ax = b, or Ax - b = 0.
 	 * Each integer solution y is scored by calculating the
@@ -348,6 +354,7 @@ void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t ord
 		rounding_error += sum * sum;
 	}
 
+#if 0
 	fprintf(stderr,"Autocorrelation coefficients\n");
 	for(j = 0; j <= (int)order; j++)
 		fprintf(stderr,"%4.22f\n",autoc[j]);
@@ -355,12 +362,13 @@ void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t ord
 	fprintf(stderr,"\nCoeffs\n");
 	for(j = 0; j < (int)order; j++)
 		fprintf(stderr,"%4.22f\n",lp_coeff[j]);
-		
+
 	fprintf(stderr,"\nUnquantized has rounding_error = %f\n",rounding_error);
 
 	fprintf(stderr,"\nDefault quantization\n");
 	for(j = 0; j < (int)order; j++)
 		fprintf(stderr,"%d\n",qlp_coeff[j]);
+#endif
 
 	do {
 		improved = false;
@@ -386,21 +394,24 @@ void FLAC__lpc_improve_quantized_coefficients(const double autoc[], uint32_t ord
 				rounding_error += sum * sum;
 			}
 
+			/* Magic tuning parameter below */
 			if(rounding_error < best_rounding_error) {
 				for(j = 0; j < (int)order; j++)
 					best_rounding[j] = current_rounding[j];
-				if(best_rounding_error > 9e29)
-					fprintf(stderr,"\nStartpoint has rounding_error = %f\n",rounding_error);
+//				if(best_rounding_error > 9e29)
+//					fprintf(stderr,"\nStartpoint has rounding_error = %f\n",rounding_error);
 				best_rounding_error = rounding_error;
 				if(i > 0)
 					improved = true;
 			}
 		}
-		fprintf(stderr,"\nImprovement has rounding_error = %f\n",best_rounding_error);
 		for(j = 0; j < (int)order; j++) {
-			qlp_coeff[j] = best_rounding[j];
-			fprintf(stderr,"%d\n",best_rounding[j]);
+			if(qlp_coeff[j] != best_rounding[j]) {
+				qlp_coeff[j] = best_rounding[j];
+			}
+//			fprintf(stderr,"%d\n",best_rounding[j]);
 		}
+//		fprintf(stderr,"Improvement has rounding_error = %f, %d coefficients changed\n",best_rounding_error, num_coeffs_changed);
 	} while(improved);
 //	fprintf(stderr,"Done ------------------\n");
 
