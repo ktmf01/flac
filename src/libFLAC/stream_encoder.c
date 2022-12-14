@@ -4037,6 +4037,9 @@ uint32_t evaluate_lpc_subframe_(
 	if(ret != 0)
 		return 0; /* this is a hack to indicate to the caller that we can't do lp at this order on this subframe */
 
+	/* Try to assemble a predictor from relevant components */
+	FLAC__lpc_assemble_predictor((FLAC__int32 *)signal, blocksize, order, qlp_coeff_precision, qlp_coeff, &quantization);
+
 	if(FLAC__lpc_max_residual_bps(subframe_bps, qlp_coeff, order, quantization) > 32) {
 		if(subframe_bps <= 32){
 			if(!FLAC__lpc_compute_residual_from_qlp_coefficients_limit_residual(((FLAC__int32 *)signal)+order, residual_samples, qlp_coeff, order, quantization, residual))

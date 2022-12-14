@@ -47,6 +47,7 @@
 #if !defined(NDEBUG) || defined FLAC__OVERFLOW_DETECT || defined FLAC__OVERFLOW_DETECT_VERBOSE
 #include <stdio.h>
 #endif
+#include <stdio.h>
 
 /* OPT: #undef'ing this may improve the speed on some architectures */
 #define FLAC__LPC_UNROLLED_FILTER_LOOPS
@@ -311,6 +312,65 @@ int FLAC__lpc_quantize_coefficients(const FLAC__real lp_coeff[], uint32_t order,
 	}
 
 	return 0;
+}
+
+int FLAC__lpc_assemble_predictor(const FLAC__int32 * flac_restrict data, uint32_t data_len, uint32_t order, uint32_t precision, FLAC__int32 qlp_coeff[], int *shift)
+{
+	int i, j;
+	int best_lag_zero_order, best_lag_first_order;
+	double averages[FLAC__MAX_LPC_ORDER] = {0};
+	int averages_sequence[FLAC__MAX_LPC_ORDER];
+	int best_difference_lag = 0;
+	double best_difference = 1e32;
+	FLAC__bool sorted;
+	
+	for(j = 0; j < (int)order; j++)
+		averages_sequence[j] = j;
+	
+	for(i = (order+1); i < (int)data_len; i++) {
+		for(j = 0; j < (int)order; j++)
+			averages[j] += fabs((double)(data[i] - data[i-j-1]));
+	}
+	
+	/* Do a bubble sort, since the elements are usually already in the right order */
+	do {
+		sorted = true;
+		for(i = 0; i < ((int)(order)-1); i++) {
+			if(averages[averages_sequence[i]] > averages[averages_sequence[i+1]]) {
+				int tmp = averages_sequence[i];
+				averages_sequence[i] = averages_sequence[i+1];
+				averages_sequence[i+1] = tmp;
+				sorted = false;
+			}
+		}
+	} while(!sorted);
+	
+	if(averages_sequence[0] > 0) {
+		fprintf(stderr,"-----\n");
+		for(j = 0; j < 5 && j < (int)order; j++)
+			fprintf(stderr,"Difference at lag %d is %f\n", averages_sequence[j]+1, averages[averages_sequence[j]]);
+	}
+	
+	/* Pass one is complete. Now, pick the best candidate and continue
+	 * with pass 2. We could further optimize by finding out whether
+	 * it is practical to average two or more elements */
+	
+	/* Maybe we could use an existing predictor and optimize it this way
+	 * by seeing the effect of a certain change on the prediction */
+
+	/* In that case we're actually correlating the residual to the data */
+	
+	/* Maybe we can do the same thing as we did with IRLS and have the
+	 * moving average of the residual play a role in how much we fine a
+	 * certain error. */
+
+	best_lag_zero_order = averages_sequence[0];
+
+	for(j = 0; j < (int)order; j++)
+		averages_sequence[j] = j;
+	
+	return 0;
+	
 }
 
 #if defined(_MSC_VER)

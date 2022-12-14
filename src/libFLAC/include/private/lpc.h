@@ -151,6 +151,8 @@ void FLAC__lpc_compute_lp_coefficients(const double autoc[], uint32_t *max_order
  */
 int FLAC__lpc_quantize_coefficients(const FLAC__real lp_coeff[], uint32_t order, uint32_t precision, FLAC__int32 qlp_coeff[], int *shift);
 
+int FLAC__lpc_assemble_predictor(const FLAC__int32 * data, uint32_t data_len, uint32_t order, uint32_t precision, FLAC__int32 qlp_coeff[], int *shift);
+
 /*
  *	FLAC__lpc_compute_residual_from_qlp_coefficients()
  *	--------------------------------------------------------------------
