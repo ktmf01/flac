@@ -151,6 +151,8 @@ void FLAC__lpc_compute_lp_coefficients(const double autoc[], uint32_t *max_order
  */
 int FLAC__lpc_quantize_coefficients(const FLAC__real lp_coeff[], uint32_t order, uint32_t precision, FLAC__int32 qlp_coeff[], int *shift);
 
+int FLAC__lpc_optimize_coefficients(FLAC__int32 * const samples, FLAC__int32 * residual, FLAC__Subframe *subframe, uint32_t blocksize);
+
 /*
  *	FLAC__lpc_compute_residual_from_qlp_coefficients()
  *	--------------------------------------------------------------------
@@ -195,6 +197,7 @@ void FLAC__lpc_compute_residual_from_qlp_coefficients_wide_intrin_avx2(const FLA
 
 uint32_t FLAC__lpc_max_prediction_before_shift_bps(uint32_t subframe_bps, const FLAC__int32 qlp_coeff[], uint32_t order);
 uint32_t FLAC__lpc_max_residual_bps(uint32_t subframe_bps, const FLAC__int32 qlp_coeff[], uint32_t order, int lp_quantization);
+uint32_t FLAC__lpc_max_residual_bps_any_predictor(uint32_t subframe_bps, uint32_t precision, uint32_t order, int lp_quantization);
 
 /*
  *	FLAC__lpc_restore_signal()

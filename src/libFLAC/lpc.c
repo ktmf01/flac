@@ -47,6 +47,7 @@
 #if !defined(NDEBUG) || defined FLAC__OVERFLOW_DETECT || defined FLAC__OVERFLOW_DETECT_VERBOSE
 #include <stdio.h>
 #endif
+#include <stdio.h>
 
 /* OPT: #undef'ing this may improve the speed on some architectures */
 #define FLAC__LPC_UNROLLED_FILTER_LOOPS
@@ -313,6 +314,145 @@ int FLAC__lpc_quantize_coefficients(const FLAC__real lp_coeff[], uint32_t order,
 	return 0;
 }
 
+static void calculate_residual_space(FLAC__int32 * residual, FLAC__byte * residual_space, uint32_t rice_parameter, int samples)
+{
+	int i;
+
+	for(i = 0; i < samples; i++) {
+		float tmp = fabs((float)residual[i]) / (float)rice_parameter * 10.0f;
+		if(tmp > 255)
+			residual_space[i] = 255;
+		else
+			residual_space[i] = tmp;
+	}
+}
+
+static int calculate_residual_improvement_firstorder(FLAC__int32 * const flac_restrict samples, FLAC__int32 * residual, uint32_t rice_parameter, int num_samples, int shift, int lag, int change)
+{
+	int i, bits_origin = 0, bits_target = 0;
+
+	for(i = 0; i < num_samples; i++) {
+		FLAC__int32 new_residual = (samples[i-lag] * change) >> shift;
+		bits_origin += ((uint32_t)abs(residual[i])) >> rice_parameter;
+		/* We add one because we don't know the value of the predictor
+		 * prior to shifting. To be safe, we always 'round up' */
+		bits_target += (((uint32_t)abs(new_residual))+1) >> rice_parameter;
+	}
+	return bits_target-bits_origin;
+}
+
+int FLAC__lpc_optimize_coefficients(FLAC__int32 * const flac_restrict samples, FLAC__int32 * flac_restrict residual, FLAC__Subframe *subframe, uint32_t blocksize)
+{
+	FLAC__byte residual_space[FLAC__MAX_BLOCK_SIZE];
+	int i, j, partition_size, partitions, order, residual_bits_change = 0;
+	double cross_correlations_firstorder[FLAC__MAX_LPC_ORDER] = {0};
+	double cross_correlations_secondorder[FLAC__MAX_LPC_ORDER] = {0};
+	int best_firstorder = 0;
+	int best_secondorder = 0;
+	double best_firstorder_cross_correlation = 0;
+	double best_secondorder_cross_correlation = 0;
+	FLAC__int32 qmax, qmin;
+	FLAC__int32 * qlp_coeff;
+
+	qmax = 1 << (subframe->data.lpc.qlp_coeff_precision-1);
+	qmin = -qmax;
+	qmax--;
+	
+	qlp_coeff = subframe->data.lpc.qlp_coeff;
+	
+	partitions = (1u << subframe->data.lpc.entropy_coding_method.data.partitioned_rice.order);
+	partition_size = blocksize / partitions;
+	order = subframe->data.lpc.order;
+
+	/* First calculate how much potential decreasing the value of a
+	 * residual sample has (or how much it hurts increasing that value */
+	for(i = 0; i < partitions; i++) {
+		int partition_size_this_partition = partition_size;
+		int rice_parameter = 0;
+		if(i == 0)
+			partition_size_this_partition -= order;
+		
+		if(subframe->data.lpc.entropy_coding_method.data.partitioned_rice.contents->raw_bits[i] == 0) {
+			rice_parameter = subframe->data.lpc.entropy_coding_method.data.partitioned_rice.contents->parameters[i];
+		}
+		else {
+			/* When an escape code is used, residual samples will be close
+			 * to each other, otherwise using a rice parameter would have
+			 * been more economical. So, we will assume that the
+			 * rice_parameter that would have been chosen would be 
+			 * raw_bits - 1 */
+			rice_parameter = subframe->data.lpc.entropy_coding_method.data.partitioned_rice.contents->raw_bits[i] - 1;
+		}
+		calculate_residual_space(residual + i * partition_size,
+			                     residual_space + i * partition_size + order,
+			                     rice_parameter,
+			                     partition_size_this_partition);
+	}
+	
+	/* Now we cross-correlate the freshly calculated weights with the
+	 * sample values */
+	for(i = order; i < (int)blocksize; i++) {
+		for(j = 0; j < order; j++)
+			cross_correlations_firstorder[j] += (double)samples[i-j-1] * (double)residual_space[i];
+		for(j = 1; j < order; j++)
+			cross_correlations_secondorder[j] += (double)(samples[i-j] - samples[i-j-1]) * (double)residual_space[i];
+	}
+	
+	for(j = 0; j < order; j++) {
+		if(fabs(cross_correlations_firstorder[j]) > fabs(best_firstorder_cross_correlation)) {
+			best_firstorder_cross_correlation = cross_correlations_firstorder[j];
+			best_firstorder = j;
+		}
+	}
+	for(j = 0; j < order; j++) {
+		if(fabs(cross_correlations_secondorder[j]) > fabs(best_secondorder_cross_correlation)) {
+			best_secondorder_cross_correlation = cross_correlations_secondorder[j];
+			best_secondorder = j;
+		}
+	}
+
+/*	fprintf(stderr,"Order %d\n",order);
+	fprintf(stderr,"Highest first order correlation for j = %d, correlation %f\n",best_firstorder,best_firstorder_cross_correlation);
+	fprintf(stderr,"Highest second order correlation for j = %d, correlation %f\n",best_secondorder,best_secondorder_cross_correlation);
+*/
+	/* Now we have a candidate, see what it does */
+	for(i = 0; i < partitions; i++) {
+		int partition_size_this_partition = partition_size;
+		int rice_parameter = 0;
+		if(i == 0)
+			partition_size_this_partition -= order;
+
+		if(qlp_coeff[best_firstorder] == qmax || qlp_coeff[best_firstorder] == qmin)
+			return 0;
+		
+		if(subframe->data.lpc.entropy_coding_method.data.partitioned_rice.contents->raw_bits[i] == 0) {
+			rice_parameter = subframe->data.lpc.entropy_coding_method.data.partitioned_rice.contents->parameters[i];
+		}
+		else {
+			/* When an escape code is used, residual samples will be close
+			 * to each other, otherwise using a rice parameter would have
+			 * been more economical. So, we will assume that the
+			 * rice_parameter that would have been chosen would be 
+			 * raw_bits - 1 */
+			rice_parameter = subframe->data.lpc.entropy_coding_method.data.partitioned_rice.contents->raw_bits[i] - 1;
+		}
+		residual_bits_change += calculate_residual_improvement_firstorder(samples + i * partition_size + order,
+		                                            residual + i * partition_size,
+		                                            rice_parameter,
+		                                            partition_size_this_partition,
+		                                            subframe->data.lpc.quantization_level,
+		                                            best_firstorder,
+		                                            best_firstorder<0?-1:1);
+	}
+	if (residual_bits_change < 0) {
+		qlp_coeff[best_firstorder] += best_firstorder<0?-1:1;
+	}
+	else {
+		return 0;
+	}
+	return 1;
+}
+	
 #if defined(_MSC_VER)
 // silence MSVC warnings about __restrict modifier
 #pragma warning ( disable : 4028 )
@@ -958,6 +1098,15 @@ uint32_t FLAC__lpc_max_prediction_before_shift_bps(uint32_t subframe_bps, const 
 uint32_t FLAC__lpc_max_residual_bps(uint32_t subframe_bps, const FLAC__int32 * flac_restrict qlp_coeff, uint32_t order, int lp_quantization)
 {
 	FLAC__int32 predictor_sum_bps = FLAC__lpc_max_prediction_before_shift_bps(subframe_bps, qlp_coeff, order) - lp_quantization;
+	if((int)subframe_bps > predictor_sum_bps)
+		return subframe_bps + 1;
+	else
+		return predictor_sum_bps + 1;
+}
+
+uint32_t FLAC__lpc_max_residual_bps_any_predictor(uint32_t subframe_bps, uint32_t precision, uint32_t order, int lp_quantization)
+{
+	FLAC__int32 predictor_sum_bps = subframe_bps + precision + FLAC__bitmath_ilog2(order) - lp_quantization;
 	if((int)subframe_bps > predictor_sum_bps)
 		return subframe_bps + 1;
 	else

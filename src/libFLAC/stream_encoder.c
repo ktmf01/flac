@@ -4089,6 +4089,38 @@ uint32_t evaluate_lpc_subframe_(
 		for(i = 0; i < order; i++)
 			subframe->data.lpc.warmup[i] = ((FLAC__int64 *)signal)[i];
 
+	if(FLAC__lpc_max_residual_bps_any_predictor(subframe_bps, qlp_coeff_precision, order, quantization) < 32) {
+		if(FLAC__lpc_optimize_coefficients(signal, residual, subframe, blocksize)) {
+			memcpy(qlp_coeff, subframe->data.lpc.qlp_coeff, sizeof(FLAC__int32)*FLAC__MAX_LPC_ORDER);
+		
+			/* Recalculate residual */
+			if(FLAC__lpc_max_prediction_before_shift_bps(subframe_bps, qlp_coeff, order) <= 32)
+				if(subframe_bps <= 16 && qlp_coeff_precision <= 16)
+					encoder->private_->local_lpc_compute_residual_from_qlp_coefficients_16bit(((FLAC__int32 *)signal)+order, residual_samples, qlp_coeff, order, quantization, residual);
+				else
+					encoder->private_->local_lpc_compute_residual_from_qlp_coefficients(((FLAC__int32 *)signal)+order, residual_samples, qlp_coeff, order, quantization, residual);
+			else
+				encoder->private_->local_lpc_compute_residual_from_qlp_coefficients_64bit(((FLAC__int32 *)signal)+order, residual_samples, qlp_coeff, order, quantization, residual);
+				
+			/* Reorder rice partitions */
+			residual_bits =
+				find_best_partition_order_(
+					encoder->private_,
+					residual,
+					abs_residual_partition_sums,
+					raw_bits_per_partition,
+					residual_samples,
+					order,
+					rice_parameter_limit,
+					min_partition_order,
+					max_partition_order,
+					subframe_bps,
+					do_escape_coding,
+					rice_parameter_search_dist,
+					&subframe->data.lpc.entropy_coding_method
+				);
+		}
+	}
 
 	estimate = FLAC__SUBFRAME_ZERO_PAD_LEN + FLAC__SUBFRAME_TYPE_LEN + FLAC__SUBFRAME_WASTED_BITS_FLAG_LEN + subframe->wasted_bits + FLAC__SUBFRAME_LPC_QLP_COEFF_PRECISION_LEN + FLAC__SUBFRAME_LPC_QLP_SHIFT_LEN + (order * (qlp_coeff_precision + subframe_bps));
 	if(residual_bits < UINT32_MAX - estimate) // To make sure estimate doesn't overflow
