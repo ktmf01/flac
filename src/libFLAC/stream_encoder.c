@@ -4090,7 +4090,8 @@ uint32_t evaluate_lpc_subframe_(
 			subframe->data.lpc.warmup[i] = ((FLAC__int64 *)signal)[i];
 
 	if(FLAC__lpc_max_residual_bps_any_predictor(subframe_bps, qlp_coeff_precision, order, quantization) < 32) {
-		if(FLAC__lpc_optimize_coefficients(signal, residual, subframe, blocksize)) {
+		while(FLAC__lpc_optimize_coefficients(signal, residual, subframe, blocksize)) {
+			uint32_t residual_bits2;
 			memcpy(qlp_coeff, subframe->data.lpc.qlp_coeff, sizeof(FLAC__int32)*FLAC__MAX_LPC_ORDER);
 		
 			/* Recalculate residual */
@@ -4103,7 +4104,7 @@ uint32_t evaluate_lpc_subframe_(
 				encoder->private_->local_lpc_compute_residual_from_qlp_coefficients_64bit(((FLAC__int32 *)signal)+order, residual_samples, qlp_coeff, order, quantization, residual);
 				
 			/* Reorder rice partitions */
-			residual_bits =
+			residual_bits2 =
 				find_best_partition_order_(
 					encoder->private_,
 					residual,
@@ -4119,6 +4120,13 @@ uint32_t evaluate_lpc_subframe_(
 					rice_parameter_search_dist,
 					&subframe->data.lpc.entropy_coding_method
 				);
+			if(residual_bits2 > residual_bits)
+				fprintf(stderr,"Failure\n");
+			else
+				fprintf(stderr,"OK\n");
+			fprintf(stderr,"Actual change in bits %d\n",residual_bits2-residual_bits);
+			fprintf(stderr,"----------------\n");
+			residual_bits = residual_bits2;
 		}
 	}
 
