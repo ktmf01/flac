@@ -4090,7 +4090,8 @@ uint32_t evaluate_lpc_subframe_(
 			subframe->data.lpc.warmup[i] = ((FLAC__int64 *)signal)[i];
 
 	if(FLAC__lpc_max_residual_bps_any_predictor(subframe_bps, qlp_coeff_precision, order, quantization) < 32) {
-		while(FLAC__lpc_optimize_coefficients(signal, residual, subframe, blocksize)) {
+		while(FLAC__lpc_optimize_coefficients(signal, residual, subframe, blocksize, 2)
+		      || FLAC__lpc_optimize_coefficients(signal, residual, subframe, blocksize, 1)) {
 			uint32_t residual_bits2;
 			memcpy(qlp_coeff, subframe->data.lpc.qlp_coeff, sizeof(FLAC__int32)*FLAC__MAX_LPC_ORDER);
 		

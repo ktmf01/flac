@@ -387,10 +387,10 @@ static int calculate_residual_improvement_secondorder(FLAC__int32 * const flac_r
 		return bits;
 }
 
-int FLAC__lpc_optimize_coefficients(FLAC__int32 * const flac_restrict samples, FLAC__int32 * flac_restrict residual, FLAC__Subframe *subframe, uint32_t blocksize, int order)
+int FLAC__lpc_optimize_coefficients(FLAC__int32 * const flac_restrict samples, FLAC__int32 * flac_restrict residual, FLAC__Subframe *subframe, uint32_t blocksize, int step)
 {
 	int8_t residual_space[FLAC__MAX_BLOCK_SIZE];
-	int i, j, partition_size, partitions, order, residual_bits_change = 0;
+	int i, j, partition_size, partitions, order, residual_bits_change = 0, samples_processed = 0;
 	double cross_correlations[FLAC__MAX_LPC_ORDER] = {0};
 	int best = 0;
 	double best_cross_correlation = 0;
@@ -434,23 +434,28 @@ int FLAC__lpc_optimize_coefficients(FLAC__int32 * const flac_restrict samples, F
 	
 	/* Now we cross-correlate the freshly calculated weights with the
 	 * sample values */
-	for(i = order; i < (int)blocksize; i++) {
-		for(j = 0; j < order; j++)
-			cross_correlations[j] += (double)samples[i-j-1] * (double)residual_space[i];
-		for(j = 1; j < order; j++)
-			cross_correlations[j] += (double)(samples[i-j] - samples[i-j-1]) * (double)residual_space[i];
-	}
-	
-	for(j = 0; j < order; j++) {
-		if(fabs(cross_correlations[j]) > fabs(best_cross_correlation)) {
-			best_cross_correlation = cross_correlations[j];
-			best = j;
+	if(step == 1) {
+		for(i = order; i < (int)blocksize; i++) {
+			for(j = 0; j < order; j++)
+				cross_correlations[j] += (double)samples[i-j-1] * (double)residual_space[i];
+		}
+		for(j = 0; j < order; j++) {
+			if(fabs(cross_correlations[j]) > fabs(best_cross_correlation)) {
+				best_cross_correlation = cross_correlations[j];
+				best = j;
+			}
 		}
 	}
-	for(j = 0; j < order; j++) {
-		if(fabs(cross_correlations[j]) > fabs(best_cross_correlation)) {
-			best_cross_correlation = cross_correlations[j];
-			best = j;
+	else if(step == 2) {
+		for(i = order; i < (int)blocksize; i++) {
+			for(j = 1; j < order; j++)
+				cross_correlations[j] += (double)(samples[i-j] - samples[i-j-1]) * (double)residual_space[i];
+		}
+		for(j = 1; j < order; j++) {
+			if(fabs(cross_correlations[j]) > fabs(best_cross_correlation)) {
+				best_cross_correlation = cross_correlations[j];
+				best = j;
+			}
 		}
 	}
 
@@ -479,19 +484,33 @@ int FLAC__lpc_optimize_coefficients(FLAC__int32 * const flac_restrict samples, F
 			 * raw_bits - 1 */
 			rice_parameter = subframe->data.lpc.entropy_coding_method.data.partitioned_rice.contents->raw_bits[i] - 1;
 		}
-		residual_bits_change += calculate_residual_improvement_secondorder(samples + i * partition_size + order,
-		                                            residual + i * partition_size,
-		                                            rice_parameter,
-		                                            partition_size_this_partition,
-		                                            subframe->data.lpc.quantization_level,
-		                                            best_secondorder+1,
-		                                            best_secondorder_cross_correlation<0?-1:1);
+		if(step == 1)
+			residual_bits_change += calculate_residual_improvement_firstorder(samples + samples_processed + order,
+			                                                                   residual + samples_processed,
+			                                                                   rice_parameter,
+			                                                                   partition_size_this_partition,
+			                                                                   subframe->data.lpc.quantization_level,
+			                                                                   best+1,
+			                                                                   best_cross_correlation<0?-1:1);
+		else if(step == 2)
+			residual_bits_change += calculate_residual_improvement_secondorder(samples + samples_processed + order,
+			                                                                   residual + samples_processed,
+			                                                                   rice_parameter,
+			                                                                   partition_size_this_partition,
+			                                                                   subframe->data.lpc.quantization_level,
+			                                                                   best+1,
+			                                                                   best_cross_correlation<0?-1:1);
+		samples_processed += partition_size_this_partition;
 	}
 	if (residual_bits_change < 0) {
-		qlp_coeff[best_secondorder] += best_cross_correlation<0?-1:1;
-		qlp_coeff[best_secondorder+1] += best_cross_correlation<0?1:+1;
+		if(step == 1)
+			qlp_coeff[best] += best_cross_correlation<0?-1:1;
+		else if(step == 2) {
+			qlp_coeff[best] += best_cross_correlation<0?1:-1;
+			qlp_coeff[best-1] += best_cross_correlation<0?-1:1;
+		}
 		fprintf(stderr,"Anticipated change in bits %d\n",residual_bits_change);
-		fprintf(stderr,"Change was in coefficient %d\n",best_secondorder);
+		fprintf(stderr,"Change was in coefficient %d\n",best);
 	}
 	else {
 		return 0;
