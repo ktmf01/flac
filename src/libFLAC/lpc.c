@@ -173,6 +173,25 @@ void FLAC__lpc_compute_autocorrelation(const FLAC__real data[], uint32_t data_le
 
 }
 
+void FLAC__lpc_compute_weighted_autocorrelation(const FLAC__real data[], FLAC__int32 residual[], uint32_t data_len, uint32_t lag, double autoc[])
+{
+	double d;
+	uint32_t sample, coeff;
+
+	FLAC__ASSERT(lag > 0);
+	FLAC__ASSERT(lag <= data_len);
+
+	for(coeff = 0; coeff < lag; coeff++)
+		autoc[coeff] = 0.0;
+
+	for(sample = 0; sample < data_len; sample++) {
+		double weight = 1.0f/fabs(residual[sample]);
+		d = data[sample] * weight;
+		for(coeff = 0; coeff < lag; coeff++)
+			autoc[coeff] += d * data[(int)sample-(int)coeff];
+	}
+}
+
 void FLAC__lpc_compute_lp_coefficients(const double autoc[], uint32_t *max_order, FLAC__real lp_coeff[][FLAC__MAX_LPC_ORDER], double error[])
 {
 	uint32_t i, j;

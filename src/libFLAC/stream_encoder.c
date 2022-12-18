@@ -3786,6 +3786,7 @@ FLAC__bool process_subframe_(
 									min_qlp_coeff_precision = max_qlp_coeff_precision = encoder->protected_->qlp_coeff_precision;
 								}
 								for(qlp_coeff_precision = min_qlp_coeff_precision; qlp_coeff_precision <= max_qlp_coeff_precision; qlp_coeff_precision++) {
+									uint32_t residual_to_be_used_in_optimization = !_best_subframe;
 									_candidate_bits =
 										evaluate_lpc_subframe_(
 											encoder,
@@ -3810,6 +3811,38 @@ FLAC__bool process_subframe_(
 										if(_candidate_bits < _best_bits) {
 											_best_subframe = !_best_subframe;
 											_best_bits = _candidate_bits;
+										}
+									}
+									fprintf(stderr,"Plain result %u\n", _candidate_bits);
+									if(subframe_bps <= 32) {
+										FLAC__lpc_compute_weighted_autocorrelation(encoder->private_->windowed_signal+lpc_order, residual[residual_to_be_used_in_optimization], frame_header->blocksize-lpc_order, lpc_order+1, autoc);
+										FLAC__lpc_compute_lp_coefficients(autoc, &lpc_order, encoder->private_->lp_coeff, lpc_error);
+										_candidate_bits =
+											evaluate_lpc_subframe_(
+												encoder,
+												integer_signal,
+												residual[!_best_subframe],
+												encoder->private_->abs_residual_partition_sums,
+												encoder->private_->raw_bits_per_partition,
+												encoder->private_->lp_coeff[lpc_order-1],
+												frame_header->blocksize,
+												subframe_bps,
+												lpc_order,
+												qlp_coeff_precision,
+												rice_parameter_limit,
+												min_partition_order,
+												max_partition_order,
+												encoder->protected_->do_escape_coding,
+												encoder->protected_->rice_parameter_search_dist,
+												subframe[!_best_subframe],
+												partitioned_rice_contents[!_best_subframe]
+											);
+										fprintf(stderr,"New result %u\n", _candidate_bits);
+										if(_candidate_bits > 0) { /* if == 0, there was a problem quantizing the lpcoeffs */
+											if(_candidate_bits < _best_bits) {
+												_best_subframe = !_best_subframe;
+												_best_bits = _candidate_bits;
+											}
 										}
 									}
 								}
