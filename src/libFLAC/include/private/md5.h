@@ -42,6 +42,23 @@ typedef struct {
 	size_t capacity;
 } FLAC__MD5Context;
 
+#ifdef HAVE_PTHREAD
+
+#include <semaphore.h>
+
+typedef struct {
+	FLAC__MD5Context *ctx;
+	FLAC__int32 ** signal;
+	uint32_t channels;
+	uint32_t samples;
+	uint32_t bytes_per_sample;
+	FLAC__bool retval;
+	sem_t * semaphore;
+} FLAC__MD5Context_pthread;
+void * FLAC__MD5Accumulate_pthread(void * args);
+#endif
+
+
 void FLAC__MD5Init(FLAC__MD5Context *context);
 void FLAC__MD5Final(FLAC__byte digest[16], FLAC__MD5Context *context);
 

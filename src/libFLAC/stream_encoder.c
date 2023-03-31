@@ -43,6 +43,10 @@
 #include <windows.h> /* for GetFileType() */
 #include <io.h> /* for _get_osfhandle() */
 #endif
+#ifdef HAVE_PTHREAD
+#include <pthread.h>
+#include <semaphore.h>
+#endif
 #include "share/compat.h"
 #include "FLAC/assert.h"
 #include "FLAC/stream_decoder.h"
@@ -294,7 +298,11 @@ static FLAC__bool set_partitioned_rice_(
 	uint32_t *bits
 );
 
+#ifdef HAVE_PTHREAD
+static uint32_t get_wasted_bits_(FLAC__int32 signal[], uint32_t samples, sem_t * semaphore);
+#else
 static uint32_t get_wasted_bits_(FLAC__int32 signal[], uint32_t samples);
+#endif
 static uint32_t get_wasted_bits_wide_(FLAC__int64 signal_wide[], FLAC__int32 signal[], uint32_t samples);
 
 /* verify-related routines: */
@@ -452,6 +460,9 @@ typedef struct FLAC__StreamEncoderPrivate {
 		} error_stats;
 	} verify;
 	FLAC__bool is_being_deleted; /* if true, call to ..._finish() from ..._delete() will not call the callbacks */
+#ifdef HAVE_PTHREAD
+	sem_t lock_integer_signal;
+#endif
 } FLAC__StreamEncoderPrivate;
 
 /***********************************************************************
@@ -556,8 +567,20 @@ FLAC_API FLAC__StreamEncoder *FLAC__stream_encoder_new(void)
 		return 0;
 	}
 
+#ifdef HAVE_PTHREAD
+	if(sem_init(&encoder->private_->lock_integer_signal, 0, 1)) {
+		free(encoder->private_);
+		free(encoder->protected_);
+		free(encoder);
+		return false;
+	}
+#endif
+
 	encoder->private_->frame = FLAC__bitwriter_new();
 	if(encoder->private_->frame == 0) {
+#ifdef HAVE_PTHREAD
+		sem_destroy(&encoder->private_->lock_integer_signal);
+#endif
 		free(encoder->private_);
 		free(encoder->protected_);
 		free(encoder);
@@ -633,6 +656,11 @@ FLAC_API void FLAC__stream_encoder_delete(FLAC__StreamEncoder *encoder)
 		FLAC__format_entropy_coding_method_partitioned_rice_contents_clear(&encoder->private_->partitioned_rice_contents_extra[i]);
 
 	FLAC__bitwriter_delete(encoder->private_->frame);
+
+#ifdef HAVE_PTHREAD
+	sem_destroy(&encoder->private_->lock_integer_signal);
+#endif
+
 	free(encoder->private_);
 	free(encoder->protected_);
 	free(encoder);
@@ -3094,15 +3122,38 @@ void update_ogg_metadata_(FLAC__StreamEncoder *encoder)
 FLAC__bool process_frame_(FLAC__StreamEncoder *encoder, FLAC__bool is_last_block)
 {
 	FLAC__uint16 crc;
+#ifdef HAVE_PTHREAD
+	pthread_t md5thread;
+	FLAC__MD5Context_pthread md5thread_args;
+#endif
 	FLAC__ASSERT(encoder->protected_->state == FLAC__STREAM_ENCODER_OK);
 
 	/*
 	 * Accumulate raw signal to the MD5 signature
 	 */
+#ifndef HAVE_PTHREAD
 	if(encoder->protected_->do_md5 && !FLAC__MD5Accumulate(&encoder->private_->md5context, (const FLAC__int32 * const *)encoder->private_->integer_signal, encoder->protected_->channels, encoder->protected_->blocksize, (encoder->protected_->bits_per_sample+7) / 8)) {
 		encoder->protected_->state = FLAC__STREAM_ENCODER_MEMORY_ALLOCATION_ERROR;
 		return false;
 	}
+#else
+	if(encoder->protected_->do_md5) {
+		FLAC__ASSERT_DECLARATION(int sem_valuecheck);
+		FLAC__ASSERT_DECLARATION(sem_getvalue(&encoder->private_->lock_integer_signal, &sem_valuecheck));
+		FLAC__ASSERT(sem_valuecheck == 1);
+		sem_wait(&encoder->private_->lock_integer_signal);
+		md5thread_args.ctx = &encoder->private_->md5context;
+		md5thread_args.signal = encoder->private_->integer_signal;
+		md5thread_args.channels = encoder->protected_->channels;
+		md5thread_args.samples = encoder->protected_->blocksize;
+		md5thread_args.bytes_per_sample = (encoder->protected_->bits_per_sample+7) / 8;
+		md5thread_args.semaphore = &encoder->private_->lock_integer_signal;
+		if(pthread_create(&md5thread, NULL, FLAC__MD5Accumulate_pthread, &md5thread_args)) {
+			encoder->protected_->state = FLAC__STREAM_ENCODER_MEMORY_ALLOCATION_ERROR;
+			return false;
+		}
+	}
+#endif
 
 	/*
 	 * Process the frame header and subframes into the frame bitbuffer
@@ -3140,12 +3191,31 @@ FLAC__bool process_frame_(FLAC__StreamEncoder *encoder, FLAC__bool is_last_block
 		return false;
 	}
 
+#ifdef HAVE_PTHREAD
+	if(encoder->protected_->do_md5) {
+		pthread_join(md5thread, NULL);
+		if(!md5thread_args.retval) {
+			encoder->protected_->state = FLAC__STREAM_ENCODER_MEMORY_ALLOCATION_ERROR;
+			return false;
+		}
+	}
+#endif
+
 	/*
 	 * Get ready for the next frame
 	 */
 	encoder->private_->current_sample_number = 0;
 	encoder->private_->current_frame_number++;
 	encoder->private_->streaminfo.data.stream_info.total_samples += (FLAC__uint64)encoder->protected_->blocksize;
+
+#ifdef HAVE_PTHREAD
+	/* Wrap up md5 thread */
+	pthread_join(md5thread, NULL);
+	if(!md5thread_args.retval) {
+		encoder->protected_->state = FLAC__STREAM_ENCODER_MEMORY_ALLOCATION_ERROR;
+		return false;
+	}
+#endif
 
 	return true;
 }
@@ -3225,7 +3295,11 @@ FLAC__bool process_subframes_(FLAC__StreamEncoder *encoder)
 	 */
 	if(do_independent) {
 		for(channel = 0; channel < encoder->protected_->channels; channel++) {
+#ifdef HAVE_PTHREAD
+			uint32_t w = get_wasted_bits_(encoder->private_->integer_signal[channel], encoder->protected_->blocksize, &encoder->private_->lock_integer_signal);
+#else
 			uint32_t w = get_wasted_bits_(encoder->private_->integer_signal[channel], encoder->protected_->blocksize);
+#endif
 			if (w > encoder->protected_->bits_per_sample) {
 				w = encoder->protected_->bits_per_sample;
 			}
@@ -3238,7 +3312,11 @@ FLAC__bool process_subframes_(FLAC__StreamEncoder *encoder)
 		for(channel = 0; channel < 2; channel++) {
 			uint32_t w;
 			if(encoder->protected_->bits_per_sample < 32 || channel == 0)
+#ifdef HAVE_PTHREAD
+				w = get_wasted_bits_(encoder->private_->integer_signal_mid_side[channel], encoder->protected_->blocksize, NULL);
+#else
 				w = get_wasted_bits_(encoder->private_->integer_signal_mid_side[channel], encoder->protected_->blocksize);
+#endif
 			else
 				w = get_wasted_bits_wide_(encoder->private_->integer_signal_33bit_side, encoder->private_->integer_signal_mid_side[channel], encoder->protected_->blocksize);
 
@@ -4466,7 +4544,11 @@ FLAC__bool set_partitioned_rice_(
 	return true;
 }
 
+#ifdef HAVE_PTHREAD
+uint32_t get_wasted_bits_(FLAC__int32 signal[], uint32_t samples, sem_t * semaphore)
+#else
 uint32_t get_wasted_bits_(FLAC__int32 signal[], uint32_t samples)
+#endif
 {
 	uint32_t i, shift;
 	FLAC__int32 x = 0;
@@ -4483,8 +4565,16 @@ uint32_t get_wasted_bits_(FLAC__int32 signal[], uint32_t samples)
 	}
 
 	if(shift > 0) {
+#ifdef HAVE_PTHREAD
+		if(semaphore != NULL)
+			sem_wait(semaphore);
+#endif
 		for(i = 0; i < samples; i++)
 			 signal[i] >>= shift;
+#ifdef HAVE_PTHREAD
+		if(semaphore != NULL)
+			sem_post(semaphore);
+#endif
 	}
 
 	return shift;

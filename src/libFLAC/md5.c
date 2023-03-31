@@ -4,6 +4,9 @@
 
 #include <stdlib.h>		/* for malloc() */
 #include <string.h>		/* for memcpy() */
+#ifdef HAVE_PTHREAD
+#include <pthread.h>
+#endif
 
 #include "private/md5.h"
 #include "share/alloc.h"
@@ -515,3 +518,13 @@ FLAC__bool FLAC__MD5Accumulate(FLAC__MD5Context *ctx, const FLAC__int32 * const 
 
 	return true;
 }
+
+#ifdef HAVE_PTHREAD
+void * FLAC__MD5Accumulate_pthread(void *args)
+{
+	FLAC__MD5Context_pthread *ctx = args;
+	ctx->retval = FLAC__MD5Accumulate(ctx->ctx, (const FLAC__int32 ** const)ctx->signal, ctx->channels, ctx->samples, ctx->bytes_per_sample);
+	sem_post(ctx->semaphore);
+	return NULL;
+}
+#endif
