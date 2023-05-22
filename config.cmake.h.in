@@ -118,6 +118,9 @@
 /* Define to 1 if you have the <unistd.h> header file. */
 #cmakedefine HAVE_UNISTD_H
 
+/* Define to 1 if you have the <winapifamily.h> header file. */
+#cmakedefine HAVE_WINAPIFAMILY_H 1
+
 /* Define to 1 if you have the <x86intrin.h> header file. */
 #cmakedefine HAVE_X86INTRIN_H
 
