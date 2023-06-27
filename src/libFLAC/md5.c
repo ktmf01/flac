@@ -523,8 +523,11 @@ FLAC__bool FLAC__MD5Accumulate(FLAC__MD5Context *ctx, const FLAC__int32 * const 
 void * FLAC__MD5Accumulate_pthread(void *args)
 {
 	FLAC__MD5Context_pthread *ctx = args;
-	ctx->retval = FLAC__MD5Accumulate(ctx->ctx, (const FLAC__int32 ** const)ctx->signal, ctx->channels, ctx->samples, ctx->bytes_per_sample);
-	sem_post(ctx->semaphore);
+	while(1) {
+		sem_wait(ctx->sem_work);
+		ctx->retval = FLAC__MD5Accumulate(ctx->ctx, (const FLAC__int32 ** const)ctx->signal, ctx->channels, ctx->samples, ctx->bytes_per_sample);
+		sem_post(ctx->sem_done);
+	}
 	return NULL;
 }
 #endif

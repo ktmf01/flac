@@ -53,7 +53,8 @@ typedef struct {
 	uint32_t samples;
 	uint32_t bytes_per_sample;
 	FLAC__bool retval;
-	sem_t * semaphore;
+	sem_t * sem_work;
+	sem_t * sem_done;
 } FLAC__MD5Context_pthread;
 void * FLAC__MD5Accumulate_pthread(void * args);
 #endif

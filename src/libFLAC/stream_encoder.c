@@ -461,7 +461,10 @@ typedef struct FLAC__StreamEncoderPrivate {
 	} verify;
 	FLAC__bool is_being_deleted; /* if true, call to ..._finish() from ..._delete() will not call the callbacks */
 #ifdef HAVE_PTHREAD
-	sem_t lock_integer_signal;
+	sem_t sem_md5_work;
+	sem_t sem_md5_done;
+	pthread_t md5thread;
+	FLAC__MD5Context_pthread md5thread_args;
 #endif
 } FLAC__StreamEncoderPrivate;
 
@@ -568,7 +571,24 @@ FLAC_API FLAC__StreamEncoder *FLAC__stream_encoder_new(void)
 	}
 
 #ifdef HAVE_PTHREAD
-	if(sem_init(&encoder->private_->lock_integer_signal, 0, 1)) {
+	if(sem_init(&encoder->private_->sem_md5_work, 0, 0)) {
+		free(encoder->private_);
+		free(encoder->protected_);
+		free(encoder);
+		return false;
+	}
+	if(sem_init(&encoder->private_->sem_md5_done, 0, 0)) {
+		sem_destroy(&encoder->private_->sem_md5_work);
+		free(encoder->private_);
+		free(encoder->protected_);
+		free(encoder);
+		return false;
+	}
+	encoder->private_->md5thread_args.sem_work = &encoder->private_->sem_md5_work;
+	encoder->private_->md5thread_args.sem_done = &encoder->private_->sem_md5_done;
+	if(pthread_create(&encoder->private_->md5thread, NULL, FLAC__MD5Accumulate_pthread, &encoder->private_->md5thread_args)) {
+		sem_destroy(&encoder->private_->sem_md5_work);
+		sem_destroy(&encoder->private_->sem_md5_done);
 		free(encoder->private_);
 		free(encoder->protected_);
 		free(encoder);
@@ -576,10 +596,14 @@ FLAC_API FLAC__StreamEncoder *FLAC__stream_encoder_new(void)
 	}
 #endif
 
+
 	encoder->private_->frame = FLAC__bitwriter_new();
 	if(encoder->private_->frame == 0) {
 #ifdef HAVE_PTHREAD
-		sem_destroy(&encoder->private_->lock_integer_signal);
+		pthread_cancel(encoder->private_->md5thread);
+		pthread_join(encoder->private_->md5thread, NULL);
+		sem_destroy(&encoder->private_->sem_md5_work);
+		sem_destroy(&encoder->private_->sem_md5_done);
 #endif
 		free(encoder->private_);
 		free(encoder->protected_);
@@ -658,7 +682,10 @@ FLAC_API void FLAC__stream_encoder_delete(FLAC__StreamEncoder *encoder)
 	FLAC__bitwriter_delete(encoder->private_->frame);
 
 #ifdef HAVE_PTHREAD
-	sem_destroy(&encoder->private_->lock_integer_signal);
+	pthread_cancel(encoder->private_->md5thread);
+	pthread_join(encoder->private_->md5thread, NULL);
+	sem_destroy(&encoder->private_->sem_md5_work);
+	sem_destroy(&encoder->private_->sem_md5_done);
 #endif
 
 	free(encoder->private_);
@@ -3122,10 +3149,6 @@ void update_ogg_metadata_(FLAC__StreamEncoder *encoder)
 FLAC__bool process_frame_(FLAC__StreamEncoder *encoder, FLAC__bool is_last_block)
 {
 	FLAC__uint16 crc;
-#ifdef HAVE_PTHREAD
-	pthread_t md5thread;
-	FLAC__MD5Context_pthread md5thread_args;
-#endif
 	FLAC__ASSERT(encoder->protected_->state == FLAC__STREAM_ENCODER_OK);
 
 	/*
@@ -3138,20 +3161,12 @@ FLAC__bool process_frame_(FLAC__StreamEncoder *encoder, FLAC__bool is_last_block
 	}
 #else
 	if(encoder->protected_->do_md5) {
-		FLAC__ASSERT_DECLARATION(int sem_valuecheck);
-		FLAC__ASSERT_DECLARATION(sem_getvalue(&encoder->private_->lock_integer_signal, &sem_valuecheck));
-		FLAC__ASSERT(sem_valuecheck == 1);
-		sem_wait(&encoder->private_->lock_integer_signal);
-		md5thread_args.ctx = &encoder->private_->md5context;
-		md5thread_args.signal = encoder->private_->integer_signal;
-		md5thread_args.channels = encoder->protected_->channels;
-		md5thread_args.samples = encoder->protected_->blocksize;
-		md5thread_args.bytes_per_sample = (encoder->protected_->bits_per_sample+7) / 8;
-		md5thread_args.semaphore = &encoder->private_->lock_integer_signal;
-		if(pthread_create(&md5thread, NULL, FLAC__MD5Accumulate_pthread, &md5thread_args)) {
-			encoder->protected_->state = FLAC__STREAM_ENCODER_MEMORY_ALLOCATION_ERROR;
-			return false;
-		}
+		encoder->private_->md5thread_args.ctx = &encoder->private_->md5context;
+		encoder->private_->md5thread_args.signal = encoder->private_->integer_signal;
+		encoder->private_->md5thread_args.channels = encoder->protected_->channels;
+		encoder->private_->md5thread_args.samples = encoder->protected_->blocksize;
+		encoder->private_->md5thread_args.bytes_per_sample = (encoder->protected_->bits_per_sample+7) / 8;
+		sem_post(&encoder->private_->sem_md5_work);
 	}
 #endif
 
@@ -3193,8 +3208,8 @@ FLAC__bool process_frame_(FLAC__StreamEncoder *encoder, FLAC__bool is_last_block
 
 #ifdef HAVE_PTHREAD
 	if(encoder->protected_->do_md5) {
-		pthread_join(md5thread, NULL);
-		if(!md5thread_args.retval) {
+		sem_wait(&encoder->private_->sem_md5_done);
+		if(!encoder->private_->md5thread_args.retval) {
 			encoder->protected_->state = FLAC__STREAM_ENCODER_MEMORY_ALLOCATION_ERROR;
 			return false;
 		}
@@ -3207,15 +3222,6 @@ FLAC__bool process_frame_(FLAC__StreamEncoder *encoder, FLAC__bool is_last_block
 	encoder->private_->current_sample_number = 0;
 	encoder->private_->current_frame_number++;
 	encoder->private_->streaminfo.data.stream_info.total_samples += (FLAC__uint64)encoder->protected_->blocksize;
-
-#ifdef HAVE_PTHREAD
-	/* Wrap up md5 thread */
-	pthread_join(md5thread, NULL);
-	if(!md5thread_args.retval) {
-		encoder->protected_->state = FLAC__STREAM_ENCODER_MEMORY_ALLOCATION_ERROR;
-		return false;
-	}
-#endif
 
 	return true;
 }
@@ -3296,7 +3302,7 @@ FLAC__bool process_subframes_(FLAC__StreamEncoder *encoder)
 	if(do_independent) {
 		for(channel = 0; channel < encoder->protected_->channels; channel++) {
 #ifdef HAVE_PTHREAD
-			uint32_t w = get_wasted_bits_(encoder->private_->integer_signal[channel], encoder->protected_->blocksize, &encoder->private_->lock_integer_signal);
+			uint32_t w = get_wasted_bits_(encoder->private_->integer_signal[channel], encoder->protected_->blocksize, encoder->protected_->do_md5?&encoder->private_->sem_md5_done:NULL);
 #else
 			uint32_t w = get_wasted_bits_(encoder->private_->integer_signal[channel], encoder->protected_->blocksize);
 #endif
