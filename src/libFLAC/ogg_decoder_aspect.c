@@ -118,6 +118,32 @@ FLAC__bool FLAC__ogg_decoder_aspect_get_decode_chained_stream(FLAC__OggDecoderAs
 	return aspect->decode_chained_stream;
 }
 
+FLAC__OggDecoderAspect_TargetLink * FLAC__ogg_decoder_aspect_get_target_link(FLAC__OggDecoderAspect* aspect, FLAC__uint64 target_sample)
+{
+	/* This returns the link containing the seek target if known. In
+	 * effect, this function always returns NULL if no links have been
+	 * indexed */
+
+	uint32_t current_link = 0;
+	uint32_t total_samples = 0;
+	uint32_t position = 0;
+	
+	while(current_link < aspect->number_of_links_indexed) {
+		total_samples += aspect->linkdetails[current_link].samples;
+		if(target_sample < total_samples) {
+			aspect->target_link.serial_number = aspect->linkdetails[current_link].serial_number;
+			aspect->target_link.start_byte = position;
+			aspect->target_link.samples_in_preceding_links = total_samples - aspect->linkdetails[current_link].samples;
+			aspect->target_link.end_byte = position + aspect->linkdetails[current_link].size;
+			aspect->target_link.samples_this_link = aspect->linkdetails[current_link].samples;
+		}
+		position += aspect->linkdetails[current_link].size;
+		current_link++;
+		return &aspect->target_link;
+	}
+	return NULL;
+}
+
 FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(FLAC__OggDecoderAspect *aspect, FLAC__byte buffer[], size_t *bytes, FLAC__OggDecoderAspectReadCallbackProxy read_callback, const FLAC__StreamDecoder *decoder, void *client_data)
 {
 	static const size_t OGG_BYTES_CHUNK = 8192;
@@ -173,6 +199,9 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(
 							aspect->end_of_stream = true;
 						else {
 							aspect->end_of_link = true;
+							aspect->linkdetails[aspect->number_of_links_indexed].samples = aspect->working_packet.granulepos;
+							aspect->linkdetails[aspect->number_of_links_indexed].serial_number = aspect->serial_number;
+							aspect->number_of_links_indexed++;
 							aspect->need_serial_number = true;
 							aspect->have_working_page = false; /* e-o-s packet ends page */
 						}
@@ -234,10 +263,12 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(
 					aspect->serial_number = ogg_page_serialno(&aspect->working_page);
 					ogg_stream_reset_serialno(&aspect->stream_state, aspect->serial_number);
 					aspect->need_serial_number = false;
+					aspect->number_of_links_detected++;
 				}
 				if(ogg_stream_pagein(&aspect->stream_state, &aspect->working_page) == 0) {
 					aspect->have_working_page = true;
 					aspect->have_working_packet = false;
+					aspect->linkdetails[aspect->number_of_links_indexed].size += aspect->working_page.header_len + aspect->working_page.body_len;
 				}
 				/* else do nothing, could be a page from another stream */
 			}

@@ -287,6 +287,7 @@ static FLAC__bool seek_barrage(FLAC__bool is_ogg, const char *filename, FLAC__of
 		return die_("FLAC__stream_decoder_new() FAILED, returned NULL\n");
 
 	if(is_ogg) {
+		FLAC__stream_decoder_set_decode_chained_stream(decoder, true);
 		if(FLAC__stream_decoder_init_ogg_file(decoder, filename, write_callback_, metadata_callback_, error_callback_, &decoder_client_data) != FLAC__STREAM_DECODER_INIT_STATUS_OK)
 			return die_s_("FLAC__stream_decoder_init_file() FAILED", decoder);
 	}
@@ -310,11 +311,12 @@ static FLAC__bool seek_barrage(FLAC__bool is_ogg, const char *filename, FLAC__of
 			return die_s_("expected FLAC__STREAM_DECODER_END_OF_STREAM", decoder);
 	}
 
-	printf("file's total_samples is %" PRIu64 "\n", decoder_client_data.total_samples);
 	n = (long int)decoder_client_data.total_samples;
 
-	if(n == 0 && total_samples >= 0)
+	if(total_samples > n)
 		n = (long int)total_samples;
+
+	printf("file's total_samples is %" PRIu64 "\n", n);
 
 	/* if we don't have a total samples count, just guess based on the file size */
 	/* @@@ for is_ogg we should get it from last page's granulepos */

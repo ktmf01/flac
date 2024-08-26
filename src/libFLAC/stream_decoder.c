@@ -3648,12 +3648,13 @@ FLAC__bool seek_to_absolute_sample_(FLAC__StreamDecoder *decoder, FLAC__uint64 s
 FLAC__bool seek_to_absolute_sample_ogg_(FLAC__StreamDecoder *decoder, FLAC__uint64 stream_length, FLAC__uint64 target_sample)
 {
 	FLAC__uint64 left_pos = 0, right_pos = stream_length;
-	FLAC__uint64 left_sample = 0, right_sample = FLAC__stream_decoder_get_total_samples(decoder);
+	FLAC__uint64 left_sample = 0, right_sample = 0;
 	FLAC__uint64 this_frame_sample = (FLAC__uint64)0 - 1;
 	FLAC__uint64 pos = 0; /* only initialized to avoid compiler warning */
 	FLAC__bool did_a_seek;
+	FLAC__OggDecoderAspect_TargetLink *target_link;
 	uint32_t iteration = 0;
-
+	
 	/* In the first iterations, we will calculate the target byte position
 	 * by the distance from the target sample to left_sample and
 	 * right_sample (let's call it "proportional search").  After that, we
@@ -3665,13 +3666,38 @@ FLAC__bool seek_to_absolute_sample_ogg_(FLAC__StreamDecoder *decoder, FLAC__uint
 	 * than this number of samples ahead of the target sample
 	 */
 	static const FLAC__uint64 LINEAR_SEARCH_WITHIN_SAMPLES = FLAC__MAX_BLOCK_SIZE * 2;
-
-	/* If the total number of samples is unknown, use a large value, and
-	 * force binary search immediately.
-	 */
-	if(right_sample == 0) {
-		right_sample = (FLAC__uint64)(-1);
-		BINARY_SEARCH_AFTER_ITERATION = 0;
+	
+	if(FLAC__ogg_decoder_aspect_get_decode_chained_stream(&decoder->protected_->ogg_decoder_aspect)) {
+		/* Check whether target sample is contained by indexed links.
+		 * If it is not keep moving forward until found */
+		while(NULL == (target_link = FLAC__ogg_decoder_aspect_get_target_link(&decoder->protected_->ogg_decoder_aspect, target_sample))) {
+			if(decoder->protected_->state == FLAC__STREAM_DECODER_END_OF_STREAM) {
+				/* Target sample is not contained in stream */
+				decoder->protected_->state = FLAC__STREAM_DECODER_SEEK_ERROR;
+				return false;				
+			}
+			FLAC__stream_decoder_process_until_end_of_link(decoder);
+			if(decoder->protected_->state == FLAC__STREAM_DECODER_END_OF_LINK)
+				FLAC__stream_decoder_finish_link(decoder);
+		}
+		/* Target link found, set boundaries */
+		left_pos = target_link->start_byte;
+		left_sample = 0;
+		right_pos = target_link->end_byte;
+		right_sample = target_link->samples_this_link;
+		target_sample -= target_link->samples_in_preceding_links;
+		decoder->protected_->ogg_decoder_aspect.serial_number = target_link->serial_number;
+	}
+	else {
+		right_sample = FLAC__stream_decoder_get_total_samples(decoder);
+		
+		/* If the total number of samples is unknown, use a large value, and
+		 * force binary search immediately.
+		 */
+		if(right_sample == 0) {
+			right_sample = (FLAC__uint64)(-1);
+			BINARY_SEARCH_AFTER_ITERATION = 0;
+		}
 	}
 
 	decoder->private_->target_sample = target_sample;

@@ -127,12 +127,28 @@ if [ $has_ogg = "yes" ] ; then
 	# seek tables are not used in Ogg FLAC
 
 	echo "testing tiny.oga:"
+	echo test_seeking tiny.oga $tiny_seek_count $tiny_samples noise8m32.raw
 	if run_test_seeking tiny.oga $tiny_seek_count $tiny_samples noise8m32.raw ; then : ; else
 		die "ERROR: during test_seeking"
 	fi
 
 	echo "testing small.oga:"
 	if run_test_seeking small.oga $small_seek_count $small_samples noise.raw ; then : ; else
+		die "ERROR: during test_seeking"
+	fi
+
+	echo "generating chained Ogg FLAC files for seeking:"
+	# need to generate a second set with a different serial number
+	tail -c 750000 noise.raw > noise-secondhalf.raw
+	run_flac --verify --force --silent --force-raw-format --endian=big --sign=signed --sample-rate=44100 --bps=16 --channels=2 --blocksize=576 --output-name=small2.oga --ogg noise-secondhalf.raw || die "ERROR generating Ogg FLAC file"
+
+	cat small.oga small2.oga > chained.oga
+	cat noise.raw noise-secondhalf.raw > chained.raw
+
+	echo "testing chained.oga:"
+	let chained_samples=$small_samples+187500
+	test_seeking chained.oga $small_seek_count $chained_samples chained.raw
+	if run_test_seeking chained.oga $small_seek_count $chained_samples chained.raw ; then : ; else
 		die "ERROR: during test_seeking"
 	fi
 
