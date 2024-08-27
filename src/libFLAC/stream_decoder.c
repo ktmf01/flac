@@ -722,8 +722,6 @@ FLAC_API FLAC__bool FLAC__stream_decoder_set_metadata_respond(FLAC__StreamDecode
 	/* double protection */
 	if((uint32_t)type > FLAC__MAX_METADATA_TYPE_CODE)
 		return false;
-	if(decoder->protected_->state != FLAC__STREAM_DECODER_UNINITIALIZED)
-		return false;
 	decoder->private_->metadata_filter[type] = true;
 	if(type == FLAC__METADATA_TYPE_APPLICATION)
 		decoder->private_->metadata_filter_ids_count = 0;
@@ -736,8 +734,6 @@ FLAC_API FLAC__bool FLAC__stream_decoder_set_metadata_respond_application(FLAC__
 	FLAC__ASSERT(0 != decoder->private_);
 	FLAC__ASSERT(0 != decoder->protected_);
 	FLAC__ASSERT(0 != id);
-	if(decoder->protected_->state != FLAC__STREAM_DECODER_UNINITIALIZED)
-		return false;
 
 	if(decoder->private_->metadata_filter[FLAC__METADATA_TYPE_APPLICATION])
 		return true;
@@ -764,8 +760,6 @@ FLAC_API FLAC__bool FLAC__stream_decoder_set_metadata_respond_all(FLAC__StreamDe
 	FLAC__ASSERT(0 != decoder);
 	FLAC__ASSERT(0 != decoder->private_);
 	FLAC__ASSERT(0 != decoder->protected_);
-	if(decoder->protected_->state != FLAC__STREAM_DECODER_UNINITIALIZED)
-		return false;
 	for(i = 0; i < sizeof(decoder->private_->metadata_filter) / sizeof(decoder->private_->metadata_filter[0]); i++)
 		decoder->private_->metadata_filter[i] = true;
 	decoder->private_->metadata_filter_ids_count = 0;
@@ -781,8 +775,6 @@ FLAC_API FLAC__bool FLAC__stream_decoder_set_metadata_ignore(FLAC__StreamDecoder
 	/* double protection */
 	if((uint32_t)type > FLAC__MAX_METADATA_TYPE_CODE)
 		return false;
-	if(decoder->protected_->state != FLAC__STREAM_DECODER_UNINITIALIZED)
-		return false;
 	decoder->private_->metadata_filter[type] = false;
 	if(type == FLAC__METADATA_TYPE_APPLICATION)
 		decoder->private_->metadata_filter_ids_count = 0;
@@ -795,8 +787,6 @@ FLAC_API FLAC__bool FLAC__stream_decoder_set_metadata_ignore_application(FLAC__S
 	FLAC__ASSERT(0 != decoder->private_);
 	FLAC__ASSERT(0 != decoder->protected_);
 	FLAC__ASSERT(0 != id);
-	if(decoder->protected_->state != FLAC__STREAM_DECODER_UNINITIALIZED)
-		return false;
 
 	if(!decoder->private_->metadata_filter[FLAC__METADATA_TYPE_APPLICATION])
 		return true;
@@ -822,8 +812,6 @@ FLAC_API FLAC__bool FLAC__stream_decoder_set_metadata_ignore_all(FLAC__StreamDec
 	FLAC__ASSERT(0 != decoder);
 	FLAC__ASSERT(0 != decoder->private_);
 	FLAC__ASSERT(0 != decoder->protected_);
-	if(decoder->protected_->state != FLAC__STREAM_DECODER_UNINITIALIZED)
-		return false;
 	memset(decoder->private_->metadata_filter, 0, sizeof(decoder->private_->metadata_filter));
 	decoder->private_->metadata_filter_ids_count = 0;
 	return true;
@@ -3659,6 +3647,7 @@ FLAC__bool seek_to_absolute_sample_ogg_(FLAC__StreamDecoder *decoder, FLAC__uint
 	FLAC__uint64 pos = 0; /* only initialized to avoid compiler warning */
 	FLAC__bool did_a_seek;
 	FLAC__OggDecoderAspect_TargetLink *target_link;
+	uint32_t current_linknumber = decoder->protected_->ogg_decoder_aspect.current_linknumber;
 	uint32_t iteration = 0;
 
 	/* In the first iterations, we will calculate the target byte position
@@ -3689,13 +3678,31 @@ FLAC__bool seek_to_absolute_sample_ogg_(FLAC__StreamDecoder *decoder, FLAC__uint
 				FLAC__stream_decoder_finish_link(decoder);
 		}
 		decoder->private_->is_indexing = false;
-		/* Target link found, set boundaries */
+		/* Target link found, send metadata if necessary */
+		FLAC__ogg_decoder_aspect_set_seek_parameters(&decoder->protected_->ogg_decoder_aspect, target_link);
+		if(target_link->linknumber != current_linknumber) {
+			if(decoder->private_->seek_callback((FLAC__StreamDecoder*)decoder, (FLAC__uint64)target_link->start_byte, decoder->private_->client_data) != FLAC__STREAM_DECODER_SEEK_STATUS_OK) {
+				decoder->protected_->state = FLAC__STREAM_DECODER_SEEK_ERROR;
+				return false;
+			}
+			if(!FLAC__stream_decoder_flush(decoder)) {
+				/* above call sets the state for us */
+				return false;
+			}
+			decoder->protected_->state = FLAC__STREAM_DECODER_SEARCH_FOR_METADATA;
+			decoder->private_->is_seeking = false;
+			if(!FLAC__stream_decoder_process_until_end_of_metadata(decoder)) {
+				decoder->protected_->state = FLAC__STREAM_DECODER_SEEK_ERROR;
+				return false;
+			}
+			decoder->private_->is_seeking = true;
+		}
+		/* set boundaries */
 		left_pos = target_link->start_byte;
 		left_sample = 0;
 		right_pos = target_link->end_byte;
 		right_sample = target_link->samples_this_link;
 		target_sample -= target_link->samples_in_preceding_links;
-		FLAC__ogg_decoder_aspect_set_seek_parameters(&decoder->protected_->ogg_decoder_aspect, target_link);
 	}
 	else {
 		right_sample = FLAC__stream_decoder_get_total_samples(decoder);
