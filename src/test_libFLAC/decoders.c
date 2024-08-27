@@ -636,6 +636,13 @@ static FLAC__bool test_stream_decoder(Layer layer, FLAC__bool is_ogg, FLAC__bool
 		return die_s_(expect? "returned false" : "returned true", decoder);
 	printf("OK\n");
 
+	if(is_chained_ogg) {
+		printf("testing FLAC__stream_decoder_seek_absolute(), seeking to second link... ");
+		if(FLAC__stream_decoder_seek_absolute(decoder, 512 * 1024) != expect)
+			return die_s_(expect? "returned false" : "returned true", decoder);
+		printf("OK\n");
+	}
+
 	printf("testing FLAC__stream_decoder_process_until_end_of_stream()... ");
 	if(!FLAC__stream_decoder_process_until_end_of_stream(decoder))
 		return die_s_("returned false", decoder);

@@ -127,7 +127,6 @@ if [ $has_ogg = "yes" ] ; then
 	# seek tables are not used in Ogg FLAC
 
 	echo "testing tiny.oga:"
-	echo test_seeking tiny.oga $tiny_seek_count $tiny_samples noise8m32.raw
 	if run_test_seeking tiny.oga $tiny_seek_count $tiny_samples noise8m32.raw ; then : ; else
 		die "ERROR: during test_seeking"
 	fi
@@ -146,8 +145,7 @@ if [ $has_ogg = "yes" ] ; then
 	cat noise.raw noise-secondhalf.raw > chained.raw
 
 	echo "testing chained.oga:"
-	let chained_samples=$small_samples+187500
-	test_seeking chained.oga $small_seek_count $chained_samples chained.raw
+	chained_samples=$(($small_samples+187500))
 	if run_test_seeking chained.oga $small_seek_count $chained_samples chained.raw ; then : ; else
 		die "ERROR: during test_seeking"
 	fi

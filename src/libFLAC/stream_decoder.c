@@ -157,6 +157,7 @@ typedef struct FLAC__StreamDecoderPrivate {
 	FLAC__bool do_md5_checking; /* initially gets protected_->md5_checking but is turned off after a seek or if the metadata has a zero MD5 */
 	FLAC__bool internal_reset_hack; /* used only during init() so we can call reset to set up the decoder without rewinding the input */
 	FLAC__bool is_seeking;
+	FLAC__bool is_indexing; /* to be able to seek in chained streams */
 	FLAC__MD5Context md5context;
 	FLAC__byte computed_md5sum[16]; /* this is the sum we computed from the decoded data */
 	/* (the rest of these are only used for seeking) */
@@ -408,6 +409,7 @@ static FLAC__StreamDecoderInitStatus init_stream_internal_(
 
 	decoder->private_->do_md5_checking = decoder->protected_->md5_checking;
 	decoder->private_->is_seeking = false;
+	decoder->private_->is_indexing = false;
 
 	decoder->private_->internal_reset_hack = true; /* so the following reset does not try to rewind the input */
 	if(!FLAC__stream_decoder_reset(decoder)) {
@@ -660,6 +662,7 @@ FLAC_API FLAC__bool FLAC__stream_decoder_finish(FLAC__StreamDecoder *decoder)
 			md5_failed = true;
 	}
 	decoder->private_->is_seeking = false;
+	decoder->private_->is_indexing = false;
 
 	set_defaults_(decoder);
 
@@ -1247,7 +1250,7 @@ FLAC_API FLAC__bool FLAC__stream_decoder_seek_absolute(FLAC__StreamDecoder *deco
 	FLAC__ASSERT(decoder->private_->length_callback);
 	FLAC__ASSERT(decoder->private_->eof_callback);
 
-	if(FLAC__stream_decoder_get_total_samples(decoder) > 0 && sample >= FLAC__stream_decoder_get_total_samples(decoder))
+	if(!FLAC__stream_decoder_get_decode_chained_stream(decoder) && FLAC__stream_decoder_get_total_samples(decoder) > 0 && sample >= FLAC__stream_decoder_get_total_samples(decoder))
 		return false;
 
 	decoder->private_->is_seeking = true;
@@ -3336,7 +3339,7 @@ FLAC__StreamDecoderWriteStatus write_audio_frame_to_client_(FLAC__StreamDecoder 
 {
 	decoder->private_->last_frame = *frame; /* save the frame */
 	decoder->private_->last_frame_is_set = true;
-	if(decoder->private_->is_seeking) {
+	if(decoder->private_->is_seeking && !decoder->private_->is_indexing) {
 		FLAC__uint64 this_frame_sample = frame->header.number.sample_number;
 		FLAC__uint64 next_frame_sample = this_frame_sample + (FLAC__uint64)frame->header.blocksize;
 		FLAC__uint64 target_sample = decoder->private_->target_sample;
@@ -3374,7 +3377,7 @@ FLAC__StreamDecoderWriteStatus write_audio_frame_to_client_(FLAC__StreamDecoder 
 			return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 		}
 	}
-	else {
+	else if(!decoder->private_->is_indexing) {
 		/*
 		 * If we never got STREAMINFO, turn off MD5 checking to save
 		 * cycles since we don't have a sum to compare to anyway
@@ -3386,6 +3389,9 @@ FLAC__StreamDecoderWriteStatus write_audio_frame_to_client_(FLAC__StreamDecoder 
 				return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
 		}
 		return decoder->private_->write_callback(decoder, frame, buffer, decoder->private_->client_data);
+	}
+	else { /* decoder->private_->is_indexing == true */
+		return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 	}
 }
 
@@ -3654,7 +3660,7 @@ FLAC__bool seek_to_absolute_sample_ogg_(FLAC__StreamDecoder *decoder, FLAC__uint
 	FLAC__bool did_a_seek;
 	FLAC__OggDecoderAspect_TargetLink *target_link;
 	uint32_t iteration = 0;
-	
+
 	/* In the first iterations, we will calculate the target byte position
 	 * by the distance from the target sample to left_sample and
 	 * right_sample (let's call it "proportional search").  After that, we
@@ -3666,31 +3672,34 @@ FLAC__bool seek_to_absolute_sample_ogg_(FLAC__StreamDecoder *decoder, FLAC__uint
 	 * than this number of samples ahead of the target sample
 	 */
 	static const FLAC__uint64 LINEAR_SEARCH_WITHIN_SAMPLES = FLAC__MAX_BLOCK_SIZE * 2;
-	
+
 	if(FLAC__ogg_decoder_aspect_get_decode_chained_stream(&decoder->protected_->ogg_decoder_aspect)) {
 		/* Check whether target sample is contained by indexed links.
 		 * If it is not keep moving forward until found */
+		decoder->private_->is_indexing = true;
 		while(NULL == (target_link = FLAC__ogg_decoder_aspect_get_target_link(&decoder->protected_->ogg_decoder_aspect, target_sample))) {
 			if(decoder->protected_->state == FLAC__STREAM_DECODER_END_OF_STREAM) {
 				/* Target sample is not contained in stream */
+				decoder->private_->is_indexing = false;
 				decoder->protected_->state = FLAC__STREAM_DECODER_SEEK_ERROR;
-				return false;				
+				return false;
 			}
 			FLAC__stream_decoder_process_until_end_of_link(decoder);
 			if(decoder->protected_->state == FLAC__STREAM_DECODER_END_OF_LINK)
 				FLAC__stream_decoder_finish_link(decoder);
 		}
+		decoder->private_->is_indexing = false;
 		/* Target link found, set boundaries */
 		left_pos = target_link->start_byte;
 		left_sample = 0;
 		right_pos = target_link->end_byte;
 		right_sample = target_link->samples_this_link;
 		target_sample -= target_link->samples_in_preceding_links;
-		decoder->protected_->ogg_decoder_aspect.serial_number = target_link->serial_number;
+		FLAC__ogg_decoder_aspect_set_seek_parameters(&decoder->protected_->ogg_decoder_aspect, target_link);
 	}
 	else {
 		right_sample = FLAC__stream_decoder_get_total_samples(decoder);
-		
+
 		/* If the total number of samples is unknown, use a large value, and
 		 * force binary search immediately.
 		 */
@@ -3804,7 +3813,8 @@ FLAC__bool seek_to_absolute_sample_ogg_(FLAC__StreamDecoder *decoder, FLAC__uint
 			}
 		}
 	}
-
+	/* Tell ogg decoder aspect that seeking is done */
+	FLAC__ogg_decoder_aspect_set_seek_parameters(&decoder->protected_->ogg_decoder_aspect, 0);
 	return true;
 }
 #endif

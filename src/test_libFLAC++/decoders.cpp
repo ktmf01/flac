@@ -728,6 +728,14 @@ static bool test_stream_decoder(Layer layer, bool is_ogg, bool is_chained_ogg)
 		return die_s_(expect? "returned false" : "returned true", decoder);
 	printf("OK\n");
 
+        if(is_chained_ogg) {
+                printf("testing seek_absolute(), seeking to second link... ");
+                if(decoder->seek_absolute(512 * 1024) != expect)
+                        return die_s_(expect? "returned false" : "returned true", decoder);
+                printf("OK\n");
+        }
+
+
 	printf("testing process_until_end_of_stream()... ");
 	if(!decoder->process_until_end_of_stream())
 		return die_s_("returned false", decoder);

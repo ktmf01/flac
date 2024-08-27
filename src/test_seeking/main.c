@@ -45,6 +45,7 @@ typedef struct {
 	FLAC__bool quiet;
 	FLAC__bool ignore_errors;
 	FLAC__bool error_occurred;
+	uint32_t last_seek_target;
 } DecoderClientData;
 
 static FLAC__bool stop_signal_ = false;
@@ -210,13 +211,15 @@ static FLAC__StreamDecoderWriteStatus write_callback_(const FLAC__StreamDecoder 
 
 	/* check against PCM data if we have it */
 	if (dcd->pcm) {
-		uint32_t c, i, j;
+		uint32_t c, i = 0, j;
 		for (c = 0; c < frame->header.channels; c++)
-			for (i = (uint32_t)frame->header.number.sample_number, j = 0; j < frame->header.blocksize; i++, j++)
+			for (i = (uint32_t)dcd->last_seek_target, j = 0; j < frame->header.blocksize; i++, j++)
 				if (buffer[c][j] != dcd->pcm[c][i]) {
 					printf("ERROR: sample mismatch at sample#%u(%u), channel=%u, expected %d, got %d\n", i, j, c, buffer[c][j], dcd->pcm[c][i]);
 					return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
 				}
+		/* Save last decoded sample for next call to this callback */
+		dcd->last_seek_target = i;
 	}
 
 	return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
@@ -302,6 +305,7 @@ static FLAC__bool seek_barrage(FLAC__bool is_ogg, const char *filename, FLAC__of
 	if(!is_ogg) { /* not necessary to do this for Ogg because of its seeking method */
 	/* process until end of stream to make sure we can still seek in that state */
 		decoder_client_data.quiet = true;
+		decoder_client_data.last_seek_target = 0;
 		if(!FLAC__stream_decoder_process_until_end_of_stream(decoder))
 			return die_s_("FLAC__stream_decoder_process_until_end_of_stream() FAILED", decoder);
 		decoder_client_data.quiet = false;
@@ -346,6 +350,7 @@ static FLAC__bool seek_barrage(FLAC__bool is_ogg, const char *filename, FLAC__of
 			pos = (FLAC__uint64)(local_rand_() % n);
 		}
 
+		decoder_client_data.last_seek_target = pos;
 		printf("#%u:seek(%" PRIu64 ")... ", i, pos);
 		fflush(stdout);
 		if(!FLAC__stream_decoder_seek_absolute(decoder, pos)) {

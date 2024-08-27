@@ -65,6 +65,8 @@ FLAC__bool FLAC__ogg_decoder_aspect_init(FLAC__OggDecoderAspect *aspect)
 	aspect->have_working_page = false;
 	aspect->end_of_link = false;
 
+	aspect->current_linknumber = 0;
+
 	return true;
 }
 
@@ -106,6 +108,7 @@ void FLAC__ogg_decoder_aspect_reset(FLAC__OggDecoderAspect *aspect)
 void FLAC__ogg_decoder_aspect_next_link(FLAC__OggDecoderAspect* aspect)
 {
 	aspect->end_of_link = false;
+	aspect->current_linknumber++;
 }
 
 void FLAC__ogg_decoder_aspect_set_decode_chained_stream(FLAC__OggDecoderAspect* aspect, FLAC__bool value)
@@ -127,7 +130,7 @@ FLAC__OggDecoderAspect_TargetLink * FLAC__ogg_decoder_aspect_get_target_link(FLA
 	uint32_t current_link = 0;
 	uint32_t total_samples = 0;
 	uint32_t position = 0;
-	
+
 	while(current_link < aspect->number_of_links_indexed) {
 		total_samples += aspect->linkdetails[current_link].samples;
 		if(target_sample < total_samples) {
@@ -136,13 +139,29 @@ FLAC__OggDecoderAspect_TargetLink * FLAC__ogg_decoder_aspect_get_target_link(FLA
 			aspect->target_link.samples_in_preceding_links = total_samples - aspect->linkdetails[current_link].samples;
 			aspect->target_link.end_byte = position + aspect->linkdetails[current_link].size;
 			aspect->target_link.samples_this_link = aspect->linkdetails[current_link].samples;
+			aspect->target_link.linknumber = current_link;
+			return &aspect->target_link;
 		}
 		position += aspect->linkdetails[current_link].size;
 		current_link++;
-		return &aspect->target_link;
 	}
 	return NULL;
 }
+
+void FLAC__ogg_decoder_aspect_set_seek_parameters(FLAC__OggDecoderAspect *aspect, FLAC__OggDecoderAspect_TargetLink *target_link)
+{
+	if(target_link == 0) {
+		aspect->is_seeking = false;
+	}
+	else {
+		aspect->need_serial_number = false;
+		aspect->current_linknumber = target_link->linknumber;
+		aspect->serial_number = target_link->serial_number;
+		ogg_stream_reset_serialno(&aspect->stream_state, aspect->serial_number);
+		aspect->is_seeking = true;
+	}
+}
+
 
 FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(FLAC__OggDecoderAspect *aspect, FLAC__byte buffer[], size_t *bytes, FLAC__OggDecoderAspectReadCallbackProxy read_callback, const FLAC__StreamDecoder *decoder, void *client_data)
 {
@@ -199,10 +218,13 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(
 							aspect->end_of_stream = true;
 						else {
 							aspect->end_of_link = true;
-							aspect->linkdetails[aspect->number_of_links_indexed].samples = aspect->working_packet.granulepos;
-							aspect->linkdetails[aspect->number_of_links_indexed].serial_number = aspect->serial_number;
-							aspect->number_of_links_indexed++;
-							aspect->need_serial_number = true;
+							if(aspect->current_linknumber >= aspect->number_of_links_indexed) {
+								aspect->linkdetails[aspect->current_linknumber].samples = aspect->working_packet.granulepos;
+								aspect->linkdetails[aspect->current_linknumber].serial_number = aspect->serial_number;
+								aspect->number_of_links_indexed++;
+							}
+							if(!aspect->is_seeking)
+								aspect->need_serial_number = true;
 							aspect->have_working_page = false; /* e-o-s packet ends page */
 						}
 					}
@@ -263,12 +285,18 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(
 					aspect->serial_number = ogg_page_serialno(&aspect->working_page);
 					ogg_stream_reset_serialno(&aspect->stream_state, aspect->serial_number);
 					aspect->need_serial_number = false;
-					aspect->number_of_links_detected++;
+					if(aspect->current_linknumber > aspect->number_of_links_detected) {
+						aspect->number_of_links_detected = aspect->current_linknumber;
+						/* TODO: do realloc instead of static allocation */
+						memset(&aspect->linkdetails[aspect->current_linknumber], 0, sizeof(FLAC__OggDecoderAspect_LinkDetails));
+					}
 				}
 				if(ogg_stream_pagein(&aspect->stream_state, &aspect->working_page) == 0) {
 					aspect->have_working_page = true;
 					aspect->have_working_packet = false;
-					aspect->linkdetails[aspect->number_of_links_indexed].size += aspect->working_page.header_len + aspect->working_page.body_len;
+					if(aspect->current_linknumber >= aspect->number_of_links_indexed) {
+						aspect->linkdetails[aspect->current_linknumber].size += aspect->working_page.header_len + aspect->working_page.body_len;
+					}
 				}
 				/* else do nothing, could be a page from another stream */
 			}
