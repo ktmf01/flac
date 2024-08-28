@@ -36,10 +36,10 @@
 
 #include <string.h> /* for memcpy() */
 #include "FLAC/assert.h"
+#include "share/alloc.h" /* for free() */
 #include "private/ogg_decoder_aspect.h"
 #include "private/ogg_mapping.h"
 #include "private/macros.h"
-
 
 /***********************************************************************
  *
@@ -66,6 +66,12 @@ FLAC__bool FLAC__ogg_decoder_aspect_init(FLAC__OggDecoderAspect *aspect)
 	aspect->end_of_link = false;
 
 	aspect->current_linknumber = 0;
+	aspect->number_of_links_indexed = 0;
+	aspect->number_of_links_detected = 0;
+
+	if(NULL == (aspect->linkdetails = safe_realloc_mul_2op_(NULL,4,sizeof(FLAC__OggDecoderAspect_LinkDetails))))
+		return false;
+	memset(aspect->linkdetails, 0, 4 * sizeof(FLAC__OggDecoderAspect_LinkDetails));
 
 	return true;
 }
@@ -74,6 +80,7 @@ void FLAC__ogg_decoder_aspect_finish(FLAC__OggDecoderAspect *aspect)
 {
 	(void)ogg_sync_clear(&aspect->sync_state);
 	(void)ogg_stream_clear(&aspect->stream_state);
+	free(aspect->linkdetails);
 }
 
 void FLAC__ogg_decoder_aspect_set_serial_number(FLAC__OggDecoderAspect *aspect, long value)
@@ -100,6 +107,7 @@ void FLAC__ogg_decoder_aspect_flush(FLAC__OggDecoderAspect *aspect)
 void FLAC__ogg_decoder_aspect_reset(FLAC__OggDecoderAspect *aspect)
 {
 	FLAC__ogg_decoder_aspect_flush(aspect);
+	aspect->current_linknumber = 0;
 
 	if(aspect->use_first_serial_number || aspect->decode_chained_stream)
 		aspect->need_serial_number = true;
@@ -285,11 +293,20 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(
 					aspect->serial_number = ogg_page_serialno(&aspect->working_page);
 					ogg_stream_reset_serialno(&aspect->stream_state, aspect->serial_number);
 					aspect->need_serial_number = false;
+
 					if(aspect->current_linknumber > aspect->number_of_links_detected) {
+						FLAC__OggDecoderAspect_LinkDetails * tmpptr = NULL;
 						aspect->number_of_links_detected = aspect->current_linknumber;
-						/* TODO: do realloc instead of static allocation */
+
+						/* reallocate in chunks of 4 */
+						if(NULL == (tmpptr = safe_realloc_nofree_mul_2op_(aspect->linkdetails,4+((aspect->current_linknumber+1)%4),sizeof(FLAC__OggDecoderAspect_LinkDetails)))) {
+							return false;
+						}
+						aspect->linkdetails = tmpptr;
 						memset(&aspect->linkdetails[aspect->current_linknumber], 0, sizeof(FLAC__OggDecoderAspect_LinkDetails));
 					}
+
+
 				}
 				if(ogg_stream_pagein(&aspect->stream_state, &aspect->working_page) == 0) {
 					aspect->have_working_page = true;

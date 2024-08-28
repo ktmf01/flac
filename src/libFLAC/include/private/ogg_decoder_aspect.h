@@ -71,7 +71,7 @@ typedef struct FLAC__OggDecoderAspect {
 	ogg_page working_page;
 	FLAC__bool have_working_packet; /* only if true will the following vars be valid */
 	ogg_packet working_packet; /* as we work through the packet we will move working_packet.packet forward and working_packet.bytes down */
-	FLAC__OggDecoderAspect_LinkDetails linkdetails[128];
+	FLAC__OggDecoderAspect_LinkDetails *linkdetails;
 	FLAC__OggDecoderAspect_TargetLink target_link; /* to pass data to the seek routine */
 	uint32_t number_of_links_detected;
 	uint32_t number_of_links_indexed;
