@@ -30,6 +30,10 @@
 #include <string.h>
 #include <time.h>
 
+#ifdef HAVE_SYS_TIME_H
+#include <sys/time.h>
+#endif
+
 #if !defined _MSC_VER && !defined __MINGW32__
 /* unlink is in stdio.h in VC++ */
 #include <unistd.h> /* for unlink() */
@@ -322,7 +326,30 @@ static int main_to_fuzz(int argc, char *argv[])
 	_setmode(fileno(stderr),_O_U8TEXT);
 #endif
 
-	srand((uint32_t)time(0));
+#ifdef HAVE_SYS_TIME_H
+	{
+		struct timeval tv;
+
+		if (gettimeofday(&tv, 0) < 0) {
+			srand(((uint32_t)time(0) << 8) + (uint32_t)clock());
+		}
+		else {
+			/* fall back when gettimeofday fails */
+			srand((uint32_t)(tv.tv_sec) * 1e6 + (uint32_t)tv.tv_usec);
+		}
+	}
+#else
+	/* time(0) does not have sufficient resolution when flac is invoked more than
+	 * once in quick succession (for example in the test suite). As far as I know,
+	 * clock() is the only sub-second portable alternative, but measures
+	 * execution time, which is often quite similar between runs. From limited
+	 * testing, it seems the value varies by about 100, so that would make
+	 * collision 100 times less likely than without. Therefore, use
+	 * both together to generate a random number seed.
+	 */
+	srand(((uint32_t)time(0) << 8) + (uint32_t)clock());
+#endif
+
 #ifdef _WIN32
 	{
 		const char *var;
@@ -1640,7 +1667,10 @@ int encode_file(const char *infilename, FLAC__bool is_first_file, FLAC__bool is_
 	encode_options.use_ogg = option_values.use_ogg;
 	/* set a random serial number if one has not yet been specified */
 	if(!option_values.has_serial_number) {
-		option_values.serial_number = rand();
+	        if (RAND_MAX < 0x7fffffff)
+			option_values.serial_number = (uint32_t)(rand() & 0x7fff) << 16 | (uint32_t)(rand());
+	        else
+			option_values.serial_number = rand();
 		option_values.has_serial_number = true;
 	}
 	encode_options.serial_number = option_values.serial_number++;
