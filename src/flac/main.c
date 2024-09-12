@@ -32,6 +32,10 @@
 
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
+#else
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #endif
 
 #if !defined _MSC_VER && !defined __MINGW32__
@@ -339,6 +343,10 @@ static int main_to_fuzz(int argc, char *argv[])
 		}
 	}
 #else
+#ifdef _WIN32
+	/* For Windows, use time and GetTickCount */
+	srand(((uint32_t)time(0) << 8) + ((uint32_t)GetTickCount() & 0xff));
+#else
 	/* time(0) does not have sufficient resolution when flac is invoked more than
 	 * once in quick succession (for example in the test suite). As far as I know,
 	 * clock() is the only sub-second portable alternative, but measures
@@ -348,6 +356,7 @@ static int main_to_fuzz(int argc, char *argv[])
 	 * both together to generate a random number seed.
 	 */
 	srand(((uint32_t)time(0) << 8) + (uint32_t)clock());
+#endif
 #endif
 
 #ifdef _WIN32
