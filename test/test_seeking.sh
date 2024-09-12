@@ -139,6 +139,7 @@ if [ $has_ogg = "yes" ] ; then
 	echo "generating chained Ogg FLAC files for seeking:"
 	# need to generate a second set with a different serial number
 	tail -c 750000 noise.raw > noise-secondhalf.raw
+	sleep 2
 	run_flac --verify --force --silent --force-raw-format --endian=big --sign=signed --sample-rate=44100 --bps=16 --channels=2 --blocksize=576 --output-name=small2.oga --ogg noise-secondhalf.raw || die "ERROR generating Ogg FLAC file"
 
 	cat small.oga small2.oga > chained.oga
