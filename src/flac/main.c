@@ -335,11 +335,11 @@ static int main_to_fuzz(int argc, char *argv[])
 		struct timeval tv;
 
 		if (gettimeofday(&tv, 0) < 0) {
+			/* fall back when gettimeofday fails */
 			srand(((uint32_t)time(0) << 8) + (uint32_t)clock());
 		}
 		else {
-			/* fall back when gettimeofday fails */
-			srand((uint32_t)(tv.tv_sec) * 1e6 + (uint32_t)tv.tv_usec);
+			srand(((uint32_t)(tv.tv_sec) << 20) + (uint32_t)tv.tv_usec);
 		}
 	}
 #else
