@@ -46,6 +46,7 @@ typedef struct FLAC__OggDecoderAspect_LinkDetails {
 	uint64_t samples;
 	uint32_t number_of_other_streams;
 	long * other_serial_numbers;
+	FLAC__bool is_last;
 } FLAC__OggDecoderAspect_LinkDetails;
 
 typedef struct FLAC__OggDecoderAspect_TargetLink {
@@ -68,6 +69,7 @@ typedef struct FLAC__OggDecoderAspect {
 	uint32_t version_major, version_minor;
 	FLAC__bool need_serial_number;
 	FLAC__bool beginning_of_link;
+	FLAC__bool bos_flag_seen;
 	FLAC__bool end_of_stream;
 	FLAC__bool end_of_link;
 	FLAC__bool decode_chained_stream;
@@ -110,5 +112,5 @@ typedef enum {
 typedef FLAC__OggDecoderAspectReadStatus (*FLAC__OggDecoderAspectReadCallbackProxy)(const void *decoder, FLAC__byte buffer[], size_t *bytes, void *client_data);
 
 FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(FLAC__OggDecoderAspect *aspect, FLAC__byte buffer[], size_t *bytes, FLAC__OggDecoderAspectReadCallbackProxy read_callback, FLAC__StreamDecoderTellCallback tell_callback, const FLAC__StreamDecoder *decoder, void *client_data);
-
+FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDecoderAspect *aspect, FLAC__OggDecoderAspectReadCallbackProxy read_callback, FLAC__StreamDecoderSeekCallback seek_callback, FLAC__StreamDecoderTellCallback tell_callback, FLAC__StreamDecoderLengthCallback length_callback, const FLAC__StreamDecoder *decoder, void *client_data);
 #endif

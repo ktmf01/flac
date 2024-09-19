@@ -109,6 +109,7 @@ static void free_metadata_blocks_(void)
 
 static FLAC__bool generate_file_(FLAC__bool is_ogg, FLAC__bool is_chained_ogg)
 {
+	FLAC__off_t filesize;
 	printf("\n\ngenerating %sFLAC file for decoder tests...\n", is_chained_ogg? "chained Ogg " : is_ogg? "Ogg " : "");
 
 	if(is_chained_ogg) {
@@ -119,7 +120,7 @@ static FLAC__bool generate_file_(FLAC__bool is_ogg, FLAC__bool is_chained_ogg)
 		if(!file_utils__generate_flacfile(is_ogg, flacfilename(is_ogg,true), &flacfilesize_, 512 * 1024, &streaminfo_, expected_metadata_sequence_other_chain_+1, 2))
 			return die_("creating the encoded file");
 		file_utils__ogg_serial_number++;
-
+		filesize=flacfilesize_;
 	}
 
 	num_expected_ = 0;
@@ -138,6 +139,7 @@ static FLAC__bool generate_file_(FLAC__bool is_ogg, FLAC__bool is_chained_ogg)
 
 	if(is_chained_ogg) {
 		file_utils__append_file(flacfilename(is_ogg, true), flacfilename(is_ogg, false));
+		flacfilesize_+=filesize;
 	}
 
 	return true;
@@ -1238,8 +1240,9 @@ FLAC__bool test_decoders(void)
 
 		if(!FLAC_API_SUPPORTS_OGG_FLAC || is_chained_ogg)
 			break;
-		if(is_ogg)
+		if(is_ogg) {
 			is_chained_ogg = true;
+		}
 		is_ogg = true;
 	}
 

@@ -3684,9 +3684,15 @@ FLAC__bool seek_to_absolute_sample_ogg_(FLAC__StreamDecoder *decoder, FLAC__uint
 				decoder->protected_->state = FLAC__STREAM_DECODER_SEEK_ERROR;
 				return false;
 			}
+/*
 			FLAC__stream_decoder_process_until_end_of_link(decoder);
 			if(decoder->protected_->state == FLAC__STREAM_DECODER_END_OF_LINK)
 				FLAC__stream_decoder_finish_link(decoder);
+*/
+			if(FLAC__ogg_decoder_aspect_skip_link(&decoder->protected_->ogg_decoder_aspect, read_callback_proxy_, decoder->private_->seek_callback, decoder->private_->tell_callback, decoder->private_->length_callback, decoder, decoder->private_->client_data) != FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK) {
+				decoder->protected_->state = FLAC__STREAM_DECODER_SEEK_ERROR;
+				return false;
+			}
 		}
 		decoder->private_->is_indexing = false;
 		/* Target link found, send metadata if necessary */
