@@ -466,8 +466,10 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 	{
 		/* End of current link is unknown, go search for it */
 		const uint32_t max_page_size = 65307;
+		const uint32_t read_size = 0;
 		uint64_t stream_length = 0;
 		uint64_t current_pos = 0;
+		uint64_t page_pos = 0;
 		uint64_t target_pos = 0;
 		uint64_t left_pos = 0;
 		uint64_t right_pos = 0;
@@ -480,7 +482,8 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 		if(tell_callback(decoder, &current_pos, client_data) != FLAC__STREAM_DECODER_TELL_STATUS_OK)
 			return false;
 
-		left_pos = current_pos - aspect->sync_state.fill + aspect->sync_state.returned;
+		current_pos = current_pos - aspect->sync_state.fill + aspect->sync_state.returned;
+		left_pos = current_pos;
 		right_pos = stream_length;
 
 		while(1){
@@ -496,7 +499,7 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 				/* Target location is already in buffer, keep reading */
 				did_a_seek = false;
 			}
-			else if(current_pos + max_page_size > target_pos) {
+			else if(current_pos < target_pos && current_pos + max_page_size > target_pos) {
 				/* Target is very close to current location, just reading is probably faster than seeking */
 				did_a_seek = false;
 			}
@@ -509,37 +512,28 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 				if(seek_callback(decoder, target_pos, client_data) != FLAC__STREAM_DECODER_SEEK_STATUS_OK)
 					return false;
 				did_a_seek = true;
+				FLAC__ASSERT(tell_callback(decoder, &current_pos, client_data) == FLAC__STREAM_DECODER_TELL_STATUS_OK);
+				FLAC__ASSERT(current_pos == target_pos);
 				current_pos = target_pos;
 				(void)ogg_stream_reset(&aspect->stream_state);
 				(void)ogg_sync_reset(&aspect->sync_state);
+			}
 
-				/* Resynchronize */
-				ret = ogg_sync_pageseek(&aspect->sync_state, &aspect->working_page);
+			/* Get a page, resynchronize if necessary */
+			while((ret = ogg_sync_pageseek(&aspect->sync_state, &aspect->working_page)) <= 0
+			      && !aspect->end_of_stream && ogg_sync_check(&aspect->sync_state) == 0) {
 				if(ret < 0)
 					current_pos -= ret;
-				while(ret <= 0 && !aspect->end_of_stream && ogg_sync_check(&aspect->sync_state) == 0) {
+				else {
 					/* need more data */
-					FLAC__OggDecoderAspectReadStatus status = read_more_data_(aspect, read_callback, 0, decoder, client_data);
+					FLAC__OggDecoderAspectReadStatus status = read_more_data_(aspect, read_callback, read_size, decoder, client_data);
 					if(status != FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK)
 						return status;
-					ret = ogg_sync_pageseek(&aspect->sync_state, &aspect->working_page);
-					if(ret < 0)
-						current_pos -= ret;
 				}
 			}
 
-			/* Now get that page */
-			if(!did_a_seek || ret > 0) {
-				ret = ogg_sync_pageout(&aspect->sync_state, &aspect->working_page);
-				while(ret == 0 && !aspect->end_of_stream && ogg_sync_check(&aspect->sync_state) == 0) {
-					/* need more data */
-					FLAC__OggDecoderAspectReadStatus status = read_more_data_(aspect, read_callback, 0, decoder, client_data);
-					if(status != FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK)
-						return status;
-					ret = ogg_sync_pageout(&aspect->sync_state, &aspect->working_page);
-				}
-
-			}
+			page_pos = current_pos;
+			current_pos += aspect->working_page.header_len + aspect->working_page.body_len;
 
 			/* Check whether the page serial number belongs to this link or another link */
 			if (ret > 0) {
@@ -560,10 +554,12 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 					}
 					if(ogg_page_serialno(&aspect->working_page) == aspect->linkdetails[aspect->current_linknumber].serial_number && ogg_page_eos(&aspect->working_page)) {
 						/* Found EOS */
-						aspect->linkdetails[aspect->current_linknumber].end_byte = current_pos + aspect->working_page.header_len + aspect->working_page.body_len;
+						aspect->linkdetails[aspect->current_linknumber].end_byte = current_pos;
 						aspect->linkdetails[aspect->current_linknumber].samples = ogg_page_granulepos(&aspect->working_page);
 
 						aspect->number_of_links_indexed++;
+						aspect->current_linknumber_advance_read++;
+						aspect->need_serial_number = true;
 
 						/* reallocate in chunks of 4 */
 						if((aspect->current_linknumber + 1) % 4 == 0) {
@@ -581,8 +577,8 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 					}
 					if(seek_was_to_current_link)
 						left_pos = current_pos;
-					else if(!did_a_seek)
-						right_pos = current_pos;
+					else if(did_a_seek)
+						right_pos = page_pos;
 					else {
 						/* Read forward but found an unknown serial number */
 						return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
