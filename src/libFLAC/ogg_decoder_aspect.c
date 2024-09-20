@@ -97,16 +97,14 @@ static FLAC__OggDecoderAspectReadStatus process_page_(FLAC__OggDecoderAspect *as
 			ogg_stream_reset_serialno(&aspect->stream_state, aspect->serial_number);
 			aspect->need_serial_number = false;
 
-			/* current_linknumber lags a bit: it is only increased after processing
-			 * of the whole links is done, while this code does advance processing */
-			if(aspect->current_linknumber >= aspect->number_of_links_detected) {
+			if(aspect->current_linknumber_advance_read >= aspect->number_of_links_detected) {
 				FLAC__uint64 tell_offset;
-				aspect->number_of_links_detected = aspect->current_linknumber + 1;
-				aspect->linkdetails[aspect->current_linknumber].serial_number = aspect->serial_number;
+				aspect->number_of_links_detected = aspect->current_linknumber_advance_read + 1;
+				aspect->linkdetails[aspect->current_linknumber_advance_read].serial_number = aspect->serial_number;
 				if(tell_callback != 0) {
 					if(tell_callback(decoder, &tell_offset, client_data) == FLAC__STREAM_DECODER_TELL_STATUS_OK)
-						aspect->linkdetails[aspect->current_linknumber].start_byte = tell_offset - aspect->sync_state.fill + aspect->sync_state.returned
-						                                                               - aspect->working_page.header_len - aspect->working_page.body_len;
+						aspect->linkdetails[aspect->current_linknumber_advance_read].start_byte = tell_offset - aspect->sync_state.fill + aspect->sync_state.returned
+						                                                                          - aspect->working_page.header_len - aspect->working_page.body_len;
 				}
 			}
 		}
@@ -126,8 +124,8 @@ static FLAC__OggDecoderAspectReadStatus process_page_(FLAC__OggDecoderAspect *as
 		 * finding the end of a link through seeking possible */
 		if(ogg_page_bos(&aspect->working_page)) {
 			aspect->bos_flag_seen = true;
-			if(aspect->current_linknumber >= aspect->number_of_links_indexed) {
-				FLAC__OggDecoderAspect_LinkDetails * current_link = &aspect->linkdetails[aspect->current_linknumber];
+			if(aspect->current_linknumber_advance_read >= aspect->number_of_links_indexed) {
+				FLAC__OggDecoderAspect_LinkDetails * current_link = &aspect->linkdetails[aspect->current_linknumber_advance_read];
 				/* Reallocate in chunks of 4 */
 				if((current_link->number_of_other_streams) % 4 == 0) {
 					long * tmpptr = NULL;
@@ -165,6 +163,7 @@ FLAC__bool FLAC__ogg_decoder_aspect_init(FLAC__OggDecoderAspect *aspect)
 	aspect->end_of_link = false;
 
 	aspect->current_linknumber = 0;
+	aspect->current_linknumber_advance_read = 0;
 	aspect->number_of_links_indexed = 0;
 	aspect->number_of_links_detected = 0;
 
@@ -213,6 +212,7 @@ void FLAC__ogg_decoder_aspect_reset(FLAC__OggDecoderAspect *aspect)
 {
 	FLAC__ogg_decoder_aspect_flush(aspect);
 	aspect->current_linknumber = 0;
+	aspect->current_linknumber_advance_read = 0;
 
 	if(aspect->use_first_serial_number || aspect->decode_chained_stream)
 		aspect->need_serial_number = true;
@@ -272,6 +272,7 @@ void FLAC__ogg_decoder_aspect_set_seek_parameters(FLAC__OggDecoderAspect *aspect
 	else {
 		aspect->need_serial_number = false;
 		aspect->current_linknumber = target_link->linknumber;
+		aspect->current_linknumber_advance_read = target_link->linknumber;
 		aspect->serial_number = target_link->serial_number;
 		ogg_stream_reset_serialno(&aspect->stream_state, aspect->serial_number);
 		aspect->is_seeking = true;
@@ -341,6 +342,7 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(
 							aspect->end_of_stream = true;
 						else {
 							aspect->end_of_link = true;
+							aspect->current_linknumber_advance_read++;
 							if(aspect->current_linknumber >= aspect->number_of_links_indexed) {
 								FLAC__uint64 tell_offset;
 								FLAC__ASSERT(aspect->current_linknumber == aspect->number_of_links_indexed);
@@ -350,6 +352,7 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(
 										aspect->linkdetails[aspect->current_linknumber].end_byte = tell_offset - aspect->sync_state.fill + aspect->sync_state.returned;
 								}
 								aspect->number_of_links_indexed++;
+								aspect->need_serial_number = true;
 
 								/* reallocate in chunks of 4 */
 								if((aspect->current_linknumber + 1) % 4 == 0) {
@@ -455,6 +458,7 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 		aspect->beginning_of_link = true;
 		aspect->need_serial_number = true;
 		aspect->current_linknumber++;
+		aspect->current_linknumber_advance_read++;
 		aspect->have_working_page = false;
 		return FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK;
 	}
@@ -534,8 +538,6 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 						return status;
 					ret = ogg_sync_pageout(&aspect->sync_state, &aspect->working_page);
 				}
-				if(ret == 0 && aspect->end_of_stream)
-					return FLAC__OGG_DECODER_ASPECT_READ_STATUS_LOST_SYNC;
 
 			}
 
@@ -573,7 +575,7 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 						}
 						memset(&aspect->linkdetails[aspect->current_linknumber+1], 0, sizeof(FLAC__OggDecoderAspect_LinkDetails));
 
-						/* TODO: check whether we are at end of stream or another link follows */
+						/* Now, continue loop to check whether we are at end of stream or another link follows */
 						FLAC__ogg_decoder_aspect_next_link(aspect);
 						continue;
 					}
@@ -585,20 +587,6 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 						/* Read forward but found an unknown serial number */
 						return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
 					}
-				}
-				else if(aspect->end_of_stream) {
-					if(did_a_seek) {
-						/* Seeking to target_pos did no result in finding a page, set right_pos to that value */
-						right_pos = target_pos;
-					}
-					else {
-						/* We expected to find the EOS page without seeking, but ended up at the end of the stream */
-						return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
-					}
-				}
-				else if(ret == 0) {
-					/* ogg error */
-					return FLAC__OGG_DECODER_ASPECT_READ_STATUS_LOST_SYNC;
 				}
 				else { /* aspect->beginning_of_link == true */
 					if(aspect->end_of_stream) {
@@ -629,6 +617,24 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 						}
 					}
 				}
+			}
+			else if(aspect->end_of_stream) {
+				if(aspect->beginning_of_link && !aspect->bos_flag_seen) {
+					/* We were looking for the next link, but found end of stream instead */
+					return FLAC__OGG_DECODER_ASPECT_READ_STATUS_END_OF_STREAM;
+				}
+				else if(did_a_seek) {
+					/* Seeking to target_pos did no result in finding a page, set right_pos to that value */
+					right_pos = target_pos;
+				}
+				else {
+					/* We expected to find the EOS page without seeking, but ended up at the end of the stream */
+					return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
+				}
+			}
+			else if(ret == 0) {
+				/* ogg error */
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_LOST_SYNC;
 			}
 		}
 	}

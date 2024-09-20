@@ -3675,6 +3675,7 @@ FLAC__bool seek_to_absolute_sample_ogg_(FLAC__StreamDecoder *decoder, FLAC__uint
 		 * If it is not keep moving forward until found */
 		decoder->private_->is_indexing = true;
 		while(NULL == (target_link = FLAC__ogg_decoder_aspect_get_target_link(&decoder->protected_->ogg_decoder_aspect, target_sample))) {
+			FLAC__OggDecoderAspectReadStatus status;
 			if(decoder->protected_->state == FLAC__STREAM_DECODER_END_OF_STREAM ||
 			   decoder->protected_->state == FLAC__STREAM_DECODER_OGG_ERROR ||
 			   decoder->protected_->state == FLAC__STREAM_DECODER_MEMORY_ALLOCATION_ERROR ||
@@ -3689,7 +3690,10 @@ FLAC__bool seek_to_absolute_sample_ogg_(FLAC__StreamDecoder *decoder, FLAC__uint
 			if(decoder->protected_->state == FLAC__STREAM_DECODER_END_OF_LINK)
 				FLAC__stream_decoder_finish_link(decoder);
 */
-			if(FLAC__ogg_decoder_aspect_skip_link(&decoder->protected_->ogg_decoder_aspect, read_callback_proxy_, decoder->private_->seek_callback, decoder->private_->tell_callback, decoder->private_->length_callback, decoder, decoder->private_->client_data) != FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK) {
+			status = FLAC__ogg_decoder_aspect_skip_link(&decoder->protected_->ogg_decoder_aspect, read_callback_proxy_, decoder->private_->seek_callback, decoder->private_->tell_callback, decoder->private_->length_callback, decoder, decoder->private_->client_data);
+			if(status == FLAC__OGG_DECODER_ASPECT_READ_STATUS_END_OF_STREAM)
+				decoder->protected_->state = FLAC__STREAM_DECODER_END_OF_STREAM;
+			else if(status != FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK) {
 				decoder->protected_->state = FLAC__STREAM_DECODER_SEEK_ERROR;
 				return false;
 			}

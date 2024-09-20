@@ -81,7 +81,8 @@ typedef struct FLAC__OggDecoderAspect {
 	FLAC__OggDecoderAspect_TargetLink target_link; /* to pass data to the seek routine */
 	uint32_t number_of_links_detected;
 	uint32_t number_of_links_indexed;
-	uint32_t current_linknumber;
+	uint32_t current_linknumber; /* The linknumber the FLAC parser is in */
+	uint32_t current_linknumber_advance_read; /* The linknumber the ogg parser is in. The name 'advance read' is because it reads ahead, to see whether there is another link */
 	FLAC__bool is_seeking;
 } FLAC__OggDecoderAspect;
 
