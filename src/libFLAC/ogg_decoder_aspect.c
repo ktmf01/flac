@@ -457,6 +457,7 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 		FLAC__ogg_decoder_aspect_flush(aspect);
 		aspect->beginning_of_link = true;
 		aspect->need_serial_number = true;
+		aspect->bos_flag_seen = false;
 		aspect->current_linknumber++;
 		aspect->current_linknumber_advance_read++;
 		aspect->have_working_page = false;
@@ -474,7 +475,9 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 		uint64_t left_pos = 0;
 		uint64_t right_pos = 0;
 		FLAC__bool did_a_seek;
-		FLAC__bool find_BOS_twice = aspect->need_serial_number;
+		FLAC__bool seek_to_left_pos = false;
+		FLAC__bool keep_reading = false;
+		FLAC__bool find_bos_twice = aspect->need_serial_number;
 		int ret = 0;
 
 		if(length_callback(decoder, &stream_length, client_data) != FLAC__STREAM_DECODER_LENGTH_STATUS_OK)
@@ -495,7 +498,11 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 			}
 			target_pos = left_pos + (right_pos - left_pos)/2;
 
-			if(current_pos > target_pos && current_pos - aspect->sync_state.fill + aspect->sync_state.returned < target_pos) {
+			if(keep_reading) {
+				/* To not end up in a loop, we need to keep reading until are able to change left_pos */
+				did_a_seek = false;
+			}
+			else if(current_pos > target_pos && current_pos - aspect->sync_state.fill + aspect->sync_state.returned < target_pos) {
 				/* Target location is already in buffer, keep reading */
 				did_a_seek = false;
 			}
@@ -508,6 +515,12 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 				did_a_seek = false;
 			}
 			else {
+				if(seek_to_left_pos || target_pos - left_pos < max_page_size) {
+					/* Seek to start of bisect area */
+					target_pos = left_pos;
+					keep_reading = true;
+					seek_to_left_pos = false;
+				}
 				/* Seek */
 				if(seek_callback(decoder, target_pos, client_data) != FLAC__STREAM_DECODER_SEEK_STATUS_OK)
 					return false;
@@ -575,8 +588,19 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 						FLAC__ogg_decoder_aspect_next_link(aspect);
 						continue;
 					}
-					if(seek_was_to_current_link)
-						left_pos = current_pos;
+					if(seek_was_to_current_link) {
+						/* If the seek landed on a page with the serial number of the stream we're interested in, we can be sure
+						 * the EOS page will be later in the stream. If the seek landed on a stream with a different serial number
+						 * however, we cannot be sure. It could be the EOS page of that stream has already been seen. In that case
+						 * something else needs to be done, else we could end up in an endless loop */
+						if(ogg_page_serialno(&aspect->working_page) == aspect->linkdetails[aspect->current_linknumber].serial_number) {
+							left_pos = current_pos;
+							keep_reading = false;
+						}
+						else {
+							seek_to_left_pos = true;
+						}
+					}
 					else if(did_a_seek)
 						right_pos = page_pos;
 					else {
@@ -600,7 +624,7 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 						 *    we need to continue after we found them
 						 * 3) We've don't know anything about the link that needs to be skipped yet, and we need to process the BOS
 						 *    pages first, and process the BOS pages of the next link */
-						FLAC__bool need_to_finish = aspect->need_serial_number && !find_BOS_twice;
+						FLAC__bool need_to_finish = aspect->need_serial_number && !find_bos_twice;
 						FLAC__OggDecoderAspectReadStatus status = process_page_(aspect, tell_callback, decoder, client_data);
 						if(status != FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK)
 							return status;
@@ -609,7 +633,7 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 								/* Found start of next link, we're done */
 								return FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK;
 							}
-							find_BOS_twice = false;
+							find_bos_twice = false;
 						}
 					}
 				}
