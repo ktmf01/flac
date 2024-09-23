@@ -442,32 +442,52 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_read_callback_wrapper(
 
 FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDecoderAspect *aspect, FLAC__OggDecoderAspectReadCallbackProxy read_callback, FLAC__StreamDecoderSeekCallback seek_callback, FLAC__StreamDecoderTellCallback tell_callback, FLAC__StreamDecoderLengthCallback length_callback, const FLAC__StreamDecoder *decoder, void *client_data)
 {
-	/* TODO: Add a non-seeking way to do this (just keep reading) and recursively call function
-	 * with one of the callbacks set to NULL if they return "unsupported" */
 	if(seek_callback == NULL || tell_callback == NULL || length_callback == NULL)
-		return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
+		return FLAC__OGG_DECODER_ASPECT_READ_STATUS_CALLBACKS_NONFUNCTIONAL;
 
 	if(aspect->current_linknumber < aspect->number_of_links_indexed) {
-		FLAC__StreamDecoderSeekStatus status;
-		status = seek_callback(decoder, aspect->linkdetails[aspect->current_linknumber].end_byte,client_data);
-		if(status == FLAC__STREAM_DECODER_SEEK_STATUS_UNSUPPORTED)
-			return FLAC__ogg_decoder_aspect_skip_link(aspect, read_callback, NULL, tell_callback, length_callback, decoder, client_data);
-		if(status == FLAC__STREAM_DECODER_SEEK_STATUS_ERROR)
-			return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
-		FLAC__ogg_decoder_aspect_flush(aspect);
-		aspect->beginning_of_link = true;
-		aspect->need_serial_number = true;
-		aspect->bos_flag_seen = false;
-		aspect->current_linknumber++;
-		aspect->current_linknumber_advance_read++;
-		aspect->have_working_page = false;
-		return FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK;
+		if(aspect->linkdetails[aspect->current_linknumber].is_last) {
+			/* Seek to end of stream */
+			FLAC__StreamDecoderLengthStatus lstatus;
+			FLAC__StreamDecoderSeekStatus sstatus;
+			uint64_t stream_length = 0;
+
+			lstatus = length_callback(decoder, &stream_length, client_data);
+			if(lstatus == FLAC__STREAM_DECODER_LENGTH_STATUS_UNSUPPORTED)
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_CALLBACKS_NONFUNCTIONAL;
+			if(lstatus == FLAC__STREAM_DECODER_LENGTH_STATUS_ERROR)
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
+
+			sstatus = seek_callback(decoder, stream_length, client_data);
+			if(sstatus == FLAC__STREAM_DECODER_SEEK_STATUS_UNSUPPORTED)
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_CALLBACKS_NONFUNCTIONAL;
+			if(sstatus == FLAC__STREAM_DECODER_SEEK_STATUS_ERROR)
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
+
+			return FLAC__OGG_DECODER_ASPECT_READ_STATUS_END_OF_STREAM;
+
+		}
+		else {
+			FLAC__StreamDecoderSeekStatus status;
+			status = seek_callback(decoder, aspect->linkdetails[aspect->current_linknumber].end_byte,client_data);
+			if(status == FLAC__STREAM_DECODER_SEEK_STATUS_UNSUPPORTED)
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_CALLBACKS_NONFUNCTIONAL;
+			if(status == FLAC__STREAM_DECODER_SEEK_STATUS_ERROR)
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
+			FLAC__ogg_decoder_aspect_flush(aspect);
+			aspect->beginning_of_link = true;
+			aspect->need_serial_number = true;
+			aspect->bos_flag_seen = false;
+			aspect->current_linknumber++;
+			aspect->current_linknumber_advance_read++;
+			aspect->have_working_page = false;
+			return FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK;
+		}
 	}
 	else
 	{
 		/* End of current link is unknown, go search for it */
 		const uint32_t max_page_size = 65307;
-		const uint32_t read_size = 0;
 		uint64_t stream_length = 0;
 		uint64_t current_pos = 0;
 		uint64_t page_pos = 0;
@@ -480,10 +500,23 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 		FLAC__bool find_bos_twice = aspect->need_serial_number;
 		int ret = 0;
 
-		if(length_callback(decoder, &stream_length, client_data) != FLAC__STREAM_DECODER_LENGTH_STATUS_OK)
-			return false;
-		if(tell_callback(decoder, &current_pos, client_data) != FLAC__STREAM_DECODER_TELL_STATUS_OK)
-			return false;
+		{
+			FLAC__StreamDecoderLengthStatus lstatus;
+			FLAC__StreamDecoderTellStatus tstatus;
+
+			lstatus = length_callback(decoder, &stream_length, client_data);
+			if(lstatus == FLAC__STREAM_DECODER_LENGTH_STATUS_UNSUPPORTED)
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_CALLBACKS_NONFUNCTIONAL;
+			if(lstatus == FLAC__STREAM_DECODER_LENGTH_STATUS_ERROR)
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
+
+			tstatus = tell_callback(decoder, &current_pos, client_data);
+			if(tstatus == FLAC__STREAM_DECODER_TELL_STATUS_UNSUPPORTED)
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_CALLBACKS_NONFUNCTIONAL;
+			if(tstatus == FLAC__STREAM_DECODER_TELL_STATUS_ERROR)
+				return FLAC__OGG_DECODER_ASPECT_READ_STATUS_ERROR;
+		}
+
 
 		current_pos = current_pos - aspect->sync_state.fill + aspect->sync_state.returned;
 		left_pos = current_pos;
@@ -539,7 +572,7 @@ FLAC__OggDecoderAspectReadStatus FLAC__ogg_decoder_aspect_skip_link(FLAC__OggDec
 					current_pos -= ret;
 				else {
 					/* need more data */
-					FLAC__OggDecoderAspectReadStatus status = read_more_data_(aspect, read_callback, read_size, decoder, client_data);
+					FLAC__OggDecoderAspectReadStatus status = read_more_data_(aspect, read_callback, 0, decoder, client_data);
 					if(status != FLAC__OGG_DECODER_ASPECT_READ_STATUS_OK)
 						return status;
 				}
