@@ -26,7 +26,11 @@
    - Unpack most recent libogg: change
       `add_library(ogg ${OGG_HEADERS} ${OGG_SOURCES})` to
       `add_library(ogg STATIC ${OGG_HEADERS} ${OGG_SOURCES})`
-   - Add `-static-libgcc` to FLAC's CFLAGS
+   - Remove conflicting version information from libwinpthread with
+     `ar dv /mingw32/lib/libwinpthread.a version.o` and
+     `ar dv /mingw64/lib/libwinpthread.a version.o`
+   - Add `-static-libgcc  -Wl,-Bstatic,--whole-archive
+     -lwinpthread -Wl,-Bdynamic,--no-whole-archive` to FLAC's CFLAGS
    - Add `-static-libgcc  -static-libstdc++ -Wl,-Bstatic,--whole-archive
      -lwinpthread -Wl,-Bdynamic,--no-whole-archive` to FLAC's CXXFLAGS
    - Run `CMake -DBUILD_SHARED_LIBS=ON .. && ninja` in both build64 and
